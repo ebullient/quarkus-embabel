@@ -1,0 +1,14 @@
+name: Embabel Agent
+artifact: ${project.groupId}:${project.artifactId}:${project.version}
+description: Embabel agent framework integration for Quarkus with LangChain4j
+metadata:
+  keywords:
+    - ai
+    - agent
+    - llm
+    - embabel
+    - langchain4j
+  guide: "https://docs.quarkiverse.io/quarkus-embabel/dev/index.html"
+  categories:
+    - "ai"
+  status: "experimental"

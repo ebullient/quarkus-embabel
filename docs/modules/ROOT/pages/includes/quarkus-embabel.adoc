@@ -1,0 +1,116 @@
+[.configuration-legend]
+icon:lock[title=Fixed at build time] Configuration property fixed at build time - All other configuration properties are overridable at runtime
+[.configuration-reference.searchable, cols="80,.^10,.^10"]
+|===
+
+h|[.header-title]##Configuration property##
+h|Type
+h|Default
+
+a|icon:lock[title=Fixed at build time] [[quarkus-embabel_quarkus-embabel-enabled]] [.property-path]##link:#quarkus-embabel_quarkus-embabel-enabled[`+++quarkus.embabel.enabled+++`]##
+ifdef::add-copy-button-to-config-props[]
+config_property_copy_button:+++quarkus.embabel.enabled+++[]
+endif::add-copy-button-to-config-props[]
+
+
+[.description]
+--
+Enable/disable the Embabel extension.
+
+
+ifdef::add-copy-button-to-env-var[]
+Environment variable: env_var_with_copy_button:+++QUARKUS_EMBABEL_ENABLED+++[]
+endif::add-copy-button-to-env-var[]
+ifndef::add-copy-button-to-env-var[]
+Environment variable: `+++QUARKUS_EMBABEL_ENABLED+++`
+endif::add-copy-button-to-env-var[]
+--
+|boolean
+|`+++true+++`
+
+a|icon:lock[title=Fixed at build time] [[quarkus-embabel_quarkus-embabel-register-spring-configurations]] [.property-path]##link:#quarkus-embabel_quarkus-embabel-register-spring-configurations[`+++quarkus.embabel.register-spring-configurations+++`]##
+ifdef::add-copy-button-to-config-props[]
+config_property_copy_button:+++quarkus.embabel.register-spring-configurations+++[]
+endif::add-copy-button-to-config-props[]
+
+
+[.description]
+--
+Auto-discover and register Spring @Configuration classes from Embabel. When enabled, the extension will scan for @Configuration classes in com.embabel packages and register them with quarkus-spring-di for CDI conversion.
+
+
+ifdef::add-copy-button-to-env-var[]
+Environment variable: env_var_with_copy_button:+++QUARKUS_EMBABEL_REGISTER_SPRING_CONFIGURATIONS+++[]
+endif::add-copy-button-to-env-var[]
+ifndef::add-copy-button-to-env-var[]
+Environment variable: `+++QUARKUS_EMBABEL_REGISTER_SPRING_CONFIGURATIONS+++`
+endif::add-copy-button-to-env-var[]
+--
+|boolean
+|`+++true+++`
+
+a|icon:lock[title=Fixed at build time] [[quarkus-embabel_quarkus-embabel-auto-discover-tools]] [.property-path]##link:#quarkus-embabel_quarkus-embabel-auto-discover-tools[`+++quarkus.embabel.auto-discover-tools+++`]##
+ifdef::add-copy-button-to-config-props[]
+config_property_copy_button:+++quarkus.embabel.auto-discover-tools+++[]
+endif::add-copy-button-to-config-props[]
+
+
+[.description]
+--
+Auto-discover and register all Tool implementations. When enabled, all classes implementing com.embabel.agent.api.tool.Tool will be registered for reflection (required for native image).
+
+
+ifdef::add-copy-button-to-env-var[]
+Environment variable: env_var_with_copy_button:+++QUARKUS_EMBABEL_AUTO_DISCOVER_TOOLS+++[]
+endif::add-copy-button-to-env-var[]
+ifndef::add-copy-button-to-env-var[]
+Environment variable: `+++QUARKUS_EMBABEL_AUTO_DISCOVER_TOOLS+++`
+endif::add-copy-button-to-env-var[]
+--
+|boolean
+|`+++true+++`
+
+a|icon:lock[title=Fixed at build time] [[quarkus-embabel_quarkus-embabel-mock-llm]] [.property-path]##link:#quarkus-embabel_quarkus-embabel-mock-llm[`+++quarkus.embabel.mock-llm+++`]##
+ifdef::add-copy-button-to-config-props[]
+config_property_copy_button:+++quarkus.embabel.mock-llm+++[]
+endif::add-copy-button-to-config-props[]
+
+
+[.description]
+--
+Create a mock LLM service for testing. When enabled, a mock LlmService bean will be created that returns canned responses. Useful for testing without real LLM API credentials.
+
+
+ifdef::add-copy-button-to-env-var[]
+Environment variable: env_var_with_copy_button:+++QUARKUS_EMBABEL_MOCK_LLM+++[]
+endif::add-copy-button-to-env-var[]
+ifndef::add-copy-button-to-env-var[]
+Environment variable: `+++QUARKUS_EMBABEL_MOCK_LLM+++`
+endif::add-copy-button-to-env-var[]
+--
+|boolean
+|`+++false+++`
+
+a|icon:lock[title=Fixed at build time] [[quarkus-embabel_quarkus-embabel-verbose]] [.property-path]##link:#quarkus-embabel_quarkus-embabel-verbose[`+++quarkus.embabel.verbose+++`]##
+ifdef::add-copy-button-to-config-props[]
+config_property_copy_button:+++quarkus.embabel.verbose+++[]
+endif::add-copy-button-to-config-props[]
+
+
+[.description]
+--
+Verbose logging during build. When enabled, the extension will log detailed information about discovered beans, registered classes, and configuration decisions.
+
+
+ifdef::add-copy-button-to-env-var[]
+Environment variable: env_var_with_copy_button:+++QUARKUS_EMBABEL_VERBOSE+++[]
+endif::add-copy-button-to-env-var[]
+ifndef::add-copy-button-to-env-var[]
+Environment variable: `+++QUARKUS_EMBABEL_VERBOSE+++`
+endif::add-copy-button-to-env-var[]
+--
+|boolean
+|`+++false+++`
+
+|===
+
