@@ -42,6 +42,11 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-openai-deployment</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

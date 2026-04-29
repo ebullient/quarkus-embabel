@@ -7,11 +7,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
 import com.embabel.agent.spi.LlmService;
 import com.embabel.agent.spi.loop.LlmMessageSender;
 import com.embabel.agent.spi.loop.streaming.LlmMessageStreamer;
@@ -26,21 +21,28 @@ import dev.langchain4j.model.chat.ChatModel;
  * Quarkus implementation of {@link LlmService} that uses LangChain4j's {@link ChatModel}.
  * <p>
  * This service wraps a LangChain4j chat model and provides the Embabel SPI interface for
- * creating message senders and managing LLM metadata. The underlying {@link ChatModel}
- * is automatically injected by quarkus-langchain4j based on configuration.
+ * creating message senders and managing LLM metadata. Instances are created synthetically
+ * at build time for each configured ChatModel, supporting multiple models in a single application.
  * <p>
- * Configuration example:
+ * Configuration example for multiple models:
  *
  * <pre>
+ * # Default OpenAI model
  * quarkus.langchain4j.openai.api-key=${OPENAI_API_KEY}
  * quarkus.langchain4j.openai.chat-model.model-name=gpt-4o
- * quarkus.langchain4j.openai.chat-model.temperature=0.7
+ *
+ * # Named "fast" model
+ * quarkus.langchain4j.openai.fast.api-key=${OPENAI_API_KEY}
+ * quarkus.langchain4j.openai.fast.chat-model.model-name=gpt-4o-mini
+ *
+ * # Named "claude" model
+ * quarkus.langchain4j.anthropic.claude.api-key=${ANTHROPIC_API_KEY}
+ * quarkus.langchain4j.anthropic.claude.chat-model.model-name=claude-3-5-sonnet
  * </pre>
  *
  * @see LlmService
  * @see ChatModel
  */
-@ApplicationScoped
 public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
 
     private final String name;
@@ -51,21 +53,18 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
     private final PricingModel pricingModel;
 
     /**
-     * Constructor for CDI injection.
+     * Constructor for synthetic bean creation.
      * <p>
-     * The model name and provider are read from configuration. The provider should match
-     * the quarkus-langchain4j provider being used (openai, anthropic, ollama, etc.).
+     * This constructor is called by the build-time recorder to create instances
+     * for each configured ChatModel. The name and provider are extracted from
+     * the quarkus-langchain4j configuration.
      *
-     * @param modelName the name of the model from configuration
-     * @param provider the provider name (openai, anthropic, ollama, etc.)
-     * @param chatModel the injected ChatModel from quarkus-langchain4j
+     * @param name the model name (e.g., "gpt-4o", "claude-3-5-sonnet")
+     * @param provider the provider name (e.g., "openai", "anthropic", "ollama")
+     * @param chatModel the ChatModel instance from quarkus-langchain4j
      */
-    @Inject
-    public QuarkusLlmService(
-            @ConfigProperty(name = "quarkus.langchain4j.chat-model.model-name") String modelName,
-            @ConfigProperty(name = "quarkus.langchain4j.chat-model.provider", defaultValue = "openai") String provider,
-            ChatModel chatModel) {
-        this(modelName, provider, chatModel, null, Collections.emptyList(), null);
+    public QuarkusLlmService(String name, String provider, ChatModel chatModel) {
+        this(name, provider, chatModel, null, Collections.emptyList(), null);
     }
 
     /**
