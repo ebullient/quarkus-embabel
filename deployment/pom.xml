@@ -28,10 +28,6 @@
             <artifactId>quarkus-langchain4j-core-deployment</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-ollama-deployment</artifactId>
-        </dependency>
-        <dependency>
             <groupId>io.quarkiverse</groupId>
             <artifactId>quarkus-embabel-agent</artifactId>
             <version>${project.version}</version>
