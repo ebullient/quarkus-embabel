@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.embabel.agent.spi.loop.LlmMessageSender;
 import com.embabel.common.ai.model.LlmOptions;
 import com.embabel.common.ai.prompt.PromptContributor;
 
@@ -64,11 +65,12 @@ class QuarkusLlmServiceTest {
     }
 
     @Test
-    void shouldThrowExceptionWhenCreatingMessageSender() {
+    void shouldCreateMessageSender() {
         LlmOptions options = LlmOptions.withDefaults();
-        assertThatThrownBy(() -> service.createMessageSender(options))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("QuarkusLlmMessageSender not yet implemented");
+        LlmMessageSender sender = service.createMessageSender(options);
+
+        assertThat(sender).isNotNull();
+        assertThat(sender).isInstanceOf(QuarkusLlmMessageSender.class);
     }
 
     @Test

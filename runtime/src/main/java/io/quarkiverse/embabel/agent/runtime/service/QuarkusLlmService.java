@@ -16,6 +16,8 @@ import com.embabel.common.ai.prompt.KnowledgeCutoffDate;
 import com.embabel.common.ai.prompt.PromptContributor;
 
 import dev.langchain4j.model.chat.ChatModel;
+import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
+import io.quarkiverse.embabel.agent.runtime.message.MessageConverterImpl;
 
 /**
  * Quarkus implementation of {@link LlmService} that uses LangChain4j's {@link ChatModel}.
@@ -120,15 +122,17 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
     /**
      * Creates a message sender for making LLM calls with the specified options.
      * <p>
-     * The message sender will be implemented in Step 13.
+     * Returns a {@link QuarkusLlmMessageSender} that wraps the LangChain4j ChatModel
+     * and handles message conversion between Embabel and LangChain4j formats.
      *
      * @param options the LLM options (temperature, max tokens, etc.)
      * @return a message sender configured with the given options
      */
     @Override
     public LlmMessageSender createMessageSender(LlmOptions options) {
-        // Will be implemented in Step 13
-        throw new UnsupportedOperationException("QuarkusLlmMessageSender not yet implemented - Step 13");
+        Objects.requireNonNull(options, "LlmOptions cannot be null");
+        MessageConverter messageConverter = new MessageConverterImpl();
+        return new QuarkusLlmMessageSender(chatModel, options, messageConverter);
     }
 
     /**
