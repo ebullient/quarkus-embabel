@@ -11,12 +11,15 @@ import com.embabel.agent.spi.loop.LlmMessageSender;
 import com.embabel.chat.Message;
 import com.embabel.common.ai.model.LlmOptions;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
 import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
+import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverter;
 
 /**
  * Quarkus implementation of {@link LlmMessageSender} that uses LangChain4j's {@link ChatModel}.
@@ -24,7 +27,7 @@ import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
  * This class handles the conversion between Embabel and LangChain4j message formats,
  * makes LLM calls using the configured ChatModel, and converts responses back to Embabel format.
  * <p>
- * This implementation supports non-tool calls. Tool support will be added in Step 14.
+ * This implementation supports both tool and non-tool calls.
  *
  * @see LlmMessageSender
  * @see ChatModel
@@ -34,6 +37,7 @@ public class QuarkusLlmMessageSender implements LlmMessageSender {
     private final ChatModel chatModel;
     private final LlmOptions options;
     private final MessageConverter messageConverter;
+    private final ToolSpecificationConverter toolConverter;
 
     /**
      * Creates a new QuarkusLlmMessageSender.
@@ -41,31 +45,37 @@ public class QuarkusLlmMessageSender implements LlmMessageSender {
      * @param chatModel the LangChain4j ChatModel to use for LLM calls
      * @param options the LLM options (temperature, max tokens, etc.)
      * @param messageConverter the converter for message format translation
+     * @param toolConverter the converter for tool specification translation
      */
     public QuarkusLlmMessageSender(
             ChatModel chatModel,
             LlmOptions options,
-            MessageConverter messageConverter) {
+            MessageConverter messageConverter,
+            ToolSpecificationConverter toolConverter) {
         this.chatModel = Objects.requireNonNull(chatModel, "ChatModel cannot be null");
         this.options = Objects.requireNonNull(options, "LlmOptions cannot be null");
         this.messageConverter = Objects.requireNonNull(messageConverter, "MessageConverter cannot be null");
+        this.toolConverter = Objects.requireNonNull(toolConverter, "ToolSpecificationConverter cannot be null");
     }
 
     /**
-     * Makes an LLM call with the given messages.
+     * Makes an LLM call with the given messages and optional tools.
      * <p>
      * This implementation:
      * <ol>
      * <li>Converts Embabel messages to LangChain4j format</li>
+     * <li>Converts tool specifications if tools are provided</li>
      * <li>Calls the LLM using the configured ChatModel</li>
      * <li>Converts the response back to Embabel format</li>
      * <li>Extracts and converts token usage information</li>
      * </ol>
      * <p>
-     * Tool support will be added in Step 14. Currently, the tools parameter is ignored.
+     * When tools are provided, the LLM may respond with tool execution requests.
+     * The response message will be an {@link com.embabel.chat.AssistantMessageWithToolCalls}
+     * containing the tool calls to execute.
      *
      * @param messages the conversation history
-     * @param tools the available tools (currently ignored - Step 14)
+     * @param tools the available tools (empty list if no tools)
      * @return the LLM response with message, text, and usage information
      */
     @Override
@@ -78,18 +88,29 @@ public class QuarkusLlmMessageSender implements LlmMessageSender {
                 .map(messageConverter::toLangChain4j)
                 .collect(Collectors.toList());
 
-        // Call the LLM (ChatModel is already configured by quarkus-langchain4j)
-        // Note: Tool support will be added in Step 14
-        ChatResponse response = chatModel.chat(lc4jMessages);
+        // Build the chat request
+        ChatRequest.Builder requestBuilder = ChatRequest.builder()
+                .messages(lc4jMessages);
+
+        // Add tool specifications if tools are provided
+        if (!tools.isEmpty()) {
+            List<ToolSpecification> toolSpecs = tools.stream()
+                    .map(toolConverter::toLangChain4j)
+                    .collect(Collectors.toList());
+            requestBuilder.toolSpecifications(toolSpecs);
+        }
+
+        // Call the LLM
+        ChatResponse response = chatModel.chat(requestBuilder.build());
 
         // Extract the AI message from the response
         AiMessage aiMessage = response.aiMessage();
 
-        // Convert the response back to Embabel format
+        // Convert response (may include tool calls)
         Message embabelMessage = messageConverter.toEmbabel(aiMessage);
 
-        // Extract text content
-        String textContent = aiMessage.text();
+        // Extract text content (use empty string if null, as when only tool calls are present)
+        String textContent = aiMessage.text() != null ? aiMessage.text() : "";
 
         // Convert token usage
         Usage usage = convertUsage(response.metadata().tokenUsage());
@@ -122,8 +143,8 @@ public class QuarkusLlmMessageSender implements LlmMessageSender {
         }
 
         return new Usage(
-                inputTokens != null ? inputTokens : 0,
-                outputTokens != null ? outputTokens : 0,
+                inputTokens,
+                outputTokens,
                 tokenUsage);
     }
 
@@ -158,5 +179,16 @@ public class QuarkusLlmMessageSender implements LlmMessageSender {
      */
     MessageConverter getMessageConverter() {
         return messageConverter;
+    }
+
+    /**
+     * Gets the tool specification converter used by this sender.
+     * <p>
+     * Exposed for testing purposes.
+     *
+     * @return the tool specification converter
+     */
+    ToolSpecificationConverter getToolConverter() {
+        return toolConverter;
     }
 }

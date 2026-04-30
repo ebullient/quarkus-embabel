@@ -18,6 +18,8 @@ import com.embabel.common.ai.prompt.PromptContributor;
 import dev.langchain4j.model.chat.ChatModel;
 import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
 import io.quarkiverse.embabel.agent.runtime.message.MessageConverterImpl;
+import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverter;
+import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverterImpl;
 
 /**
  * Quarkus implementation of {@link LlmService} that uses LangChain4j's {@link ChatModel}.
@@ -132,7 +134,8 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
     public LlmMessageSender createMessageSender(LlmOptions options) {
         Objects.requireNonNull(options, "LlmOptions cannot be null");
         MessageConverter messageConverter = new MessageConverterImpl();
-        return new QuarkusLlmMessageSender(chatModel, options, messageConverter);
+        ToolSpecificationConverter toolConverter = new ToolSpecificationConverterImpl();
+        return new QuarkusLlmMessageSender(chatModel, options, messageConverter, toolConverter);
     }
 
     /**
