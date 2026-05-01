@@ -1,7 +1,9 @@
 package io.quarkiverse.embabel.agent.runtime.loop;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -9,11 +11,17 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.embabel.agent.api.tool.Tool;
+import com.embabel.agent.spi.loop.MaxIterationsExceededException;
 import com.embabel.agent.spi.loop.ToolLoop;
 import com.embabel.agent.spi.loop.ToolLoopResult;
 import com.embabel.chat.Message;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
 import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverter;
 import kotlin.jvm.functions.Function1;
@@ -93,7 +101,57 @@ public class QuarkusToolLoop implements ToolLoop {
             Function1<? super String, ? extends O> outputParser) {
 
         List<Message> messages = new ArrayList<>(initialMessages);
-        // TODO: Implement loop
-        throw new UnsupportedOperationException("Not yet implemented");
+        List<ToolSpecification> toolSpecs = initialTools.stream()
+                .map(toolConverter::toLangChain4j)
+                .collect(Collectors.toList());
+
+        int iterations = 0;
+        while (iterations < maxIterations) {
+            iterations++;
+
+            // Convert to LangChain4j
+            List<ChatMessage> lc4jMessages = messages.stream()
+                    .map(messageConverter::toLangChain4j)
+                    .collect(Collectors.toList());
+
+            // Build chat request with tools
+            ChatRequest.Builder requestBuilder = ChatRequest.builder()
+                    .messages(lc4jMessages);
+
+            if (!toolSpecs.isEmpty()) {
+                requestBuilder.toolSpecifications(toolSpecs);
+            }
+
+            // Call LLM (model from quarkus-langchain4j)
+            ChatResponse response = model.chat(requestBuilder.build());
+            AiMessage aiMessage = response.aiMessage();
+
+            // Add to history
+            messages.add(messageConverter.toEmbabel(aiMessage));
+
+            // Check for tool calls
+            if (!aiMessage.hasToolExecutionRequests()) {
+                // No tools - parse and return
+                String responseText = aiMessage.text() != null ? aiMessage.text() : "";
+                O output = outputParser.invoke(responseText);
+                return new ToolLoopResult<>(
+                        output,
+                        responseText,
+                        messages,
+                        iterations,
+                        Collections.emptyList(), // injectedTools
+                        Collections.emptyList(), // removedTools
+                        null, // totalUsage
+                        false, // replanRequested
+                        null, // replanReason
+                        blackboard -> {
+                        }); // empty BlackboardUpdater
+            }
+
+            // TODO: Execute tools (Step 17)
+            throw new UnsupportedOperationException("Tool execution not yet implemented");
+        }
+
+        throw new MaxIterationsExceededException(maxIterations);
     }
 }
