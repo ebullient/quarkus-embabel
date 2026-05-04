@@ -3,8 +3,6 @@ package io.quarkiverse.embabel.agent.runtime.message;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import jakarta.enterprise.context.ApplicationScoped;
-
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.ChatMessage;
 
@@ -15,7 +13,6 @@ import dev.langchain4j.data.message.ChatMessage;
  * This implementation ensures that message content is preserved during conversion
  * and handles all supported message types according to the Embabel specification.
  */
-@ApplicationScoped
 public class MessageConverterImpl implements MessageConverter {
 
     /**

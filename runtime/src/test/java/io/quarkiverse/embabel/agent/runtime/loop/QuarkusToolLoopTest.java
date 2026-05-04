@@ -1,9 +1,9 @@
 package io.quarkiverse.embabel.agent.runtime.loop;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,36 +13,53 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.embabel.agent.api.tool.Tool;
+import com.embabel.agent.api.tool.ToolCallContext;
+import com.embabel.agent.spi.loop.EmptyResponsePolicy;
+import com.embabel.agent.spi.loop.LlmMessageResponse;
+import com.embabel.agent.spi.loop.LlmMessageSender;
+import com.embabel.agent.spi.loop.ToolInjectionStrategy;
 import com.embabel.agent.spi.loop.ToolLoopResult;
+import com.embabel.agent.spi.loop.ToolNotFoundPolicy;
+import com.embabel.chat.AssistantMessage;
+import com.embabel.chat.AssistantMessageWithToolCalls;
 import com.embabel.chat.Message;
 import com.embabel.chat.SystemMessage;
+import com.embabel.chat.ToolCall;
+import com.embabel.chat.ToolResultMessage;
 import com.embabel.chat.UserMessage;
-
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
-import io.quarkiverse.embabel.agent.runtime.message.MessageConverterImpl;
-import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Unit tests for {@link QuarkusToolLoop}.
+ * Unit tests for {@link QuarkusToolLoop} using the factory pattern.
  */
 class QuarkusToolLoopTest {
 
-    private ChatModel mockChatModel;
-    private MessageConverterImpl messageConverter; // Real converter, not mocked
-    private ToolSpecificationConverter mockToolConverter;
+    private LlmMessageSender mockMessageSender;
+    private ObjectMapper objectMapper;
+    private QuarkusToolLoopFactory factory;
     private QuarkusToolLoop toolLoop;
 
     @BeforeEach
     void setUp() {
-        mockChatModel = mock(ChatModel.class);
-        messageConverter = new MessageConverterImpl(); // Use real implementation
-        mockToolConverter = mock(ToolSpecificationConverter.class);
-        toolLoop = new QuarkusToolLoop(mockChatModel, messageConverter, mockToolConverter);
-        toolLoop.maxIterations = 10;
+        mockMessageSender = mock(LlmMessageSender.class);
+        objectMapper = new ObjectMapper();
+        factory = new QuarkusToolLoopFactory();
+        factory.objectMapper = objectMapper;
+
+        // Create ToolLoop via factory with minimal parameters
+        toolLoop = (QuarkusToolLoop) factory.create(
+                mockMessageSender,
+                objectMapper,
+                ToolInjectionStrategy.Companion.getNONE(),
+                10,
+                null, // toolDecorator
+                Collections.emptyList(), // toolLoopInspectors
+                Collections.emptyList(), // toolLoopTransformers
+                Collections.emptyList(), // toolCallInspectors
+                ToolCallContext.EMPTY,
+                mock(ToolNotFoundPolicy.class),
+                mock(EmptyResponsePolicy.class));
     }
 
     @Test
@@ -52,12 +69,13 @@ class QuarkusToolLoopTest {
                 new SystemMessage("You are a helpful assistant"),
                 new UserMessage("What is 2+2?"));
 
-        // Mock LLM response without tool calls - converter will handle the conversion
-        AiMessage aiMessage = AiMessage.from("The answer is 4");
-        ChatResponse chatResponse = ChatResponse.builder()
-                .aiMessage(aiMessage)
-                .build();
-        when(mockChatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
+        // Mock LLM response without tool calls
+        AssistantMessage assistantMessage = new AssistantMessage("The answer is 4");
+        LlmMessageResponse response = new LlmMessageResponse(
+                assistantMessage,
+                "The answer is 4",
+                null);
+        when(mockMessageSender.call(anyList(), anyList())).thenReturn(response);
 
         // When
         ToolLoopResult<String> result = toolLoop.execute(
@@ -74,39 +92,117 @@ class QuarkusToolLoopTest {
         assertThat(result.getInjectedTools()).isEmpty();
         assertThat(result.getReplanRequested()).isFalse();
 
-        // Verify LLM was called once
-        verify(mockChatModel).chat(any(ChatRequest.class));
+        // Verify message sender was called once
+        verify(mockMessageSender).call(anyList(), anyList());
     }
 
     @Test
-    void shouldDetectToolCallsAndThrowUnsupportedOperation() {
+    void shouldExecuteToolsAndReturnFinalResponse() {
+        // Given
+        List<Message> initialMessages = List.of(
+                new SystemMessage("You are a helpful assistant"),
+                new UserMessage("What's the weather in London?"));
+
+        // Create a mock tool
+        Tool weatherTool = Tool.create(
+                "get_weather",
+                "Get weather for a location",
+                input -> Tool.Result.text("Sunny, 22°C"));
+
+        // First call: LLM requests tool
+        ToolCall toolCall = new ToolCall(
+                "call_123",
+                "get_weather",
+                "{\"location\":\"London\"}");
+        AssistantMessageWithToolCalls toolCallMessage = new AssistantMessageWithToolCalls(
+                List.of(toolCall));
+        LlmMessageResponse toolCallResponse = new LlmMessageResponse(
+                toolCallMessage,
+                "",
+                null);
+
+        // Second call: LLM provides final answer after tool result
+        AssistantMessage finalMessage = new AssistantMessage("The weather in London is sunny with 22°C");
+        LlmMessageResponse finalResponse = new LlmMessageResponse(
+                finalMessage,
+                "The weather in London is sunny with 22°C",
+                null);
+
+        when(mockMessageSender.call(anyList(), anyList()))
+                .thenReturn(toolCallResponse)
+                .thenReturn(finalResponse);
+
+        // When
+        ToolLoopResult<String> result = toolLoop.execute(
+                initialMessages,
+                List.of(weatherTool),
+                text -> text);
+
+        // Then
+        assertThat(result).isNotNull();
+        assertThat(result.getResult()).isEqualTo("The weather in London is sunny with 22°C");
+        assertThat(result.getTotalIterations()).isEqualTo(2);
+        assertThat(result.getConversationHistory()).hasSize(5); // system + user + assistant(tool call) + tool result + final
+
+        // Verify tool result message was added
+        Message toolResultMsg = result.getConversationHistory().get(3);
+        assertThat(toolResultMsg).isInstanceOf(ToolResultMessage.class);
+        ToolResultMessage toolResult = (ToolResultMessage) toolResultMsg;
+        assertThat(toolResult.getToolCallId()).isEqualTo("call_123");
+        assertThat(toolResult.getToolName()).isEqualTo("get_weather");
+        assertThat(toolResult.getContent()).isEqualTo("Sunny, 22°C");
+
+        // Verify message sender was called twice
+        verify(mockMessageSender, times(2)).call(anyList(), anyList());
+    }
+
+    @Test
+    void shouldHandleToolErrors() {
         // Given
         List<Message> initialMessages = List.of(
                 new SystemMessage("You are a helpful assistant"),
                 new UserMessage("What's the weather?"));
 
-        // Mock LLM response WITH tool calls - converter will handle the conversion
-        ToolExecutionRequest toolRequest = ToolExecutionRequest.builder()
-                .id("call_123")
-                .name("get_weather")
-                .arguments("{\"location\":\"London\"}")
-                .build();
-        AiMessage aiMessage = AiMessage.from(toolRequest);
-        ChatResponse chatResponse = ChatResponse.builder()
-                .aiMessage(aiMessage)
-                .build();
-        when(mockChatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
+        // LLM requests a tool that doesn't exist
+        ToolCall toolCall = new ToolCall(
+                "call_123",
+                "nonexistent_tool",
+                "{}");
+        AssistantMessageWithToolCalls toolCallMessage = new AssistantMessageWithToolCalls(
+                List.of(toolCall));
+        LlmMessageResponse toolCallResponse = new LlmMessageResponse(
+                toolCallMessage,
+                "",
+                null);
 
-        // When/Then - should detect tool calls and throw UnsupportedOperationException
-        assertThatThrownBy(() -> toolLoop.execute(
+        // Second call: LLM handles the error
+        AssistantMessage finalMessage = new AssistantMessage("I don't have access to that tool");
+        LlmMessageResponse finalResponse = new LlmMessageResponse(
+                finalMessage,
+                "I don't have access to that tool",
+                null);
+
+        when(mockMessageSender.call(anyList(), anyList()))
+                .thenReturn(toolCallResponse)
+                .thenReturn(finalResponse);
+
+        // When
+        ToolLoopResult<String> result = toolLoop.execute(
                 initialMessages,
                 Collections.emptyList(),
-                text -> text))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Tool execution not yet implemented");
+                text -> text);
 
-        // Verify LLM was called
-        verify(mockChatModel).chat(any(ChatRequest.class));
+        // Then
+        assertThat(result).isNotNull();
+        assertThat(result.getTotalIterations()).isEqualTo(2);
+
+        // Verify error message was added
+        Message toolResultMsg = result.getConversationHistory().get(3);
+        assertThat(toolResultMsg).isInstanceOf(ToolResultMessage.class);
+        ToolResultMessage toolResult = (ToolResultMessage) toolResultMsg;
+        assertThat(toolResult.getContent()).contains("Error: Tool 'nonexistent_tool' not found");
+
+        verify(mockMessageSender, times(2)).call(anyList(), anyList());
     }
 
 }

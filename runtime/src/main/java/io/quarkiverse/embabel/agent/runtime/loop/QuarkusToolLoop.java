@@ -3,41 +3,37 @@ package io.quarkiverse.embabel.agent.runtime.loop;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
-
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.embabel.agent.api.tool.Tool;
+import com.embabel.agent.api.tool.ToolCallContext;
+import com.embabel.agent.api.tool.callback.ToolCallInspector;
+import com.embabel.agent.api.tool.callback.ToolLoopInspector;
+import com.embabel.agent.api.tool.callback.ToolLoopTransformer;
+import com.embabel.agent.spi.loop.EmptyResponsePolicy;
+import com.embabel.agent.spi.loop.LlmMessageResponse;
+import com.embabel.agent.spi.loop.LlmMessageSender;
 import com.embabel.agent.spi.loop.MaxIterationsExceededException;
+import com.embabel.agent.spi.loop.ToolInjectionStrategy;
 import com.embabel.agent.spi.loop.ToolLoop;
 import com.embabel.agent.spi.loop.ToolLoopResult;
+import com.embabel.agent.spi.loop.ToolNotFoundPolicy;
+import com.embabel.chat.AssistantMessageWithToolCalls;
 import com.embabel.chat.Message;
+import com.embabel.chat.ToolCall;
+import com.embabel.chat.ToolResultMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
-import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
-import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
-import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverter;
 import kotlin.jvm.functions.Function1;
 
 /**
- * Quarkus implementation of {@link ToolLoop} that executes tool-calling conversations
- * using LangChain4j's {@link ChatModel}.
+ * Quarkus implementation of {@link ToolLoop} that executes tool-calling conversations.
  * <p>
- * This implementation provides Embabel's tool loop functionality in Quarkus applications,
- * managing the conversation flow between the LLM and tool executions. It handles:
- * <ul>
- * <li>Message conversion between Embabel and LangChain4j formats</li>
- * <li>Tool specification conversion for LLM consumption</li>
- * <li>Iterative tool calling until completion or max iterations</li>
- * <li>Conversation history tracking</li>
- * </ul>
+ * This implementation is NOT a singleton - instances are created per request by
+ * {@link QuarkusToolLoopFactory}. Each instance is bound to a specific {@link LlmMessageSender}
+ * which encapsulates the model selection and message conversion logic.
+ * <p>
+ * This design enables multiple model support: different requests can use different models
+ * by creating ToolLoop instances with different LlmMessageSender implementations.
  * <p>
  * The loop continues until:
  * <ul>
@@ -47,33 +43,64 @@ import kotlin.jvm.functions.Function1;
  * </ul>
  *
  * @see ToolLoop
- * @see ChatModel
+ * @see QuarkusToolLoopFactory
+ * @see LlmMessageSender
  */
-@ApplicationScoped
 public class QuarkusToolLoop implements ToolLoop {
 
-    private final ChatModel model;
-    private final MessageConverter messageConverter;
-    private final ToolSpecificationConverter toolConverter;
-
-    @ConfigProperty(name = "embabel.agent.platform.autonomy.max-iterations", defaultValue = "10")
-    int maxIterations;
+    private final LlmMessageSender messageSender;
+    private final ObjectMapper objectMapper;
+    private final ToolInjectionStrategy injectionStrategy;
+    private final int maxIterations;
+    private final Function1<? super Tool, ? extends Tool> toolDecorator;
+    private final List<? extends ToolLoopInspector> toolLoopInspectors;
+    private final List<? extends ToolLoopTransformer> toolLoopTransformers;
+    private final List<? extends ToolCallInspector> toolCallInspectors;
+    private final ToolCallContext toolCallContext;
+    private final ToolNotFoundPolicy toolNotFoundPolicy;
+    private final EmptyResponsePolicy emptyResponsePolicy;
 
     /**
-     * Constructor for CDI injection.
+     * Package-private constructor - called by {@link QuarkusToolLoopFactory}.
+     * <p>
+     * All 11 parameters match the {@link com.embabel.agent.spi.loop.ToolLoopFactory#create}
+     * signature, ensuring compatibility with the Embabel SPI.
      *
-     * @param model the ChatModel to use for LLM interactions
-     * @param messageConverter converter for Embabel ↔ LangChain4j messages
-     * @param toolConverter converter for Embabel tools → LangChain4j tool specifications
+     * @param messageSender the LLM message sender (encapsulates model + converters)
+     * @param objectMapper for JSON deserialization of tool results
+     * @param injectionStrategy strategy for dynamic tool injection
+     * @param maxIterations maximum loop iterations before throwing exception
+     * @param toolDecorator optional decorator for injected tools
+     * @param toolLoopInspectors read-only observers for tool loop lifecycle events
+     * @param toolLoopTransformers transformers for modifying conversation history
+     * @param toolCallInspectors read-only observers for individual tool call events
+     * @param toolCallContext context propagated to tool invocations
+     * @param toolNotFoundPolicy policy for handling tool-not-found errors
+     * @param emptyResponsePolicy policy for handling empty LLM responses
      */
-    @Inject
-    public QuarkusToolLoop(
-            ChatModel model,
-            MessageConverter messageConverter,
-            ToolSpecificationConverter toolConverter) {
-        this.model = model;
-        this.messageConverter = messageConverter;
-        this.toolConverter = toolConverter;
+    QuarkusToolLoop(
+            LlmMessageSender messageSender,
+            ObjectMapper objectMapper,
+            ToolInjectionStrategy injectionStrategy,
+            int maxIterations,
+            Function1<? super Tool, ? extends Tool> toolDecorator,
+            List<? extends ToolLoopInspector> toolLoopInspectors,
+            List<? extends ToolLoopTransformer> toolLoopTransformers,
+            List<? extends ToolCallInspector> toolCallInspectors,
+            ToolCallContext toolCallContext,
+            ToolNotFoundPolicy toolNotFoundPolicy,
+            EmptyResponsePolicy emptyResponsePolicy) {
+        this.messageSender = messageSender;
+        this.objectMapper = objectMapper;
+        this.injectionStrategy = injectionStrategy;
+        this.maxIterations = maxIterations;
+        this.toolDecorator = toolDecorator;
+        this.toolLoopInspectors = toolLoopInspectors;
+        this.toolLoopTransformers = toolLoopTransformers;
+        this.toolCallInspectors = toolCallInspectors;
+        this.toolCallContext = toolCallContext;
+        this.toolNotFoundPolicy = toolNotFoundPolicy;
+        this.emptyResponsePolicy = emptyResponsePolicy;
     }
 
     /**
@@ -81,12 +108,15 @@ public class QuarkusToolLoop implements ToolLoop {
      * <p>
      * This method implements the core tool loop logic:
      * <ol>
-     * <li>Convert initial messages to LangChain4j format</li>
-     * <li>Send messages to LLM with available tools</li>
+     * <li>Delegate to messageSender to call LLM with current messages and tools</li>
      * <li>If LLM requests tool calls, execute them and add results to conversation</li>
      * <li>Repeat until LLM provides final response or max iterations reached</li>
      * <li>Parse final response and return result with conversation history</li>
      * </ol>
+     * <p>
+     * Note: Message conversion is handled by the LlmMessageSender, not here.
+     * This keeps the loop implementation clean and delegates format conversion
+     * to the appropriate layer.
      *
      * @param initialMessages the starting messages (system + user)
      * @param initialTools the initially available tools
@@ -101,38 +131,23 @@ public class QuarkusToolLoop implements ToolLoop {
             Function1<? super String, ? extends O> outputParser) {
 
         List<Message> messages = new ArrayList<>(initialMessages);
-        List<ToolSpecification> toolSpecs = initialTools.stream()
-                .map(toolConverter::toLangChain4j)
-                .collect(Collectors.toList());
+        List<Tool> tools = new ArrayList<>(initialTools);
 
         int iterations = 0;
         while (iterations < maxIterations) {
             iterations++;
 
-            // Convert to LangChain4j
-            List<ChatMessage> lc4jMessages = messages.stream()
-                    .map(messageConverter::toLangChain4j)
-                    .collect(Collectors.toList());
-
-            // Build chat request with tools
-            ChatRequest.Builder requestBuilder = ChatRequest.builder()
-                    .messages(lc4jMessages);
-
-            if (!toolSpecs.isEmpty()) {
-                requestBuilder.toolSpecifications(toolSpecs);
-            }
-
-            // Call LLM (model from quarkus-langchain4j)
-            ChatResponse response = model.chat(requestBuilder.build());
-            AiMessage aiMessage = response.aiMessage();
+            // Delegate to messageSender - it handles all message conversion
+            LlmMessageResponse response = messageSender.call(messages, tools);
+            Message embabelMessage = response.getMessage();
 
             // Add to history
-            messages.add(messageConverter.toEmbabel(aiMessage));
+            messages.add(embabelMessage);
 
-            // Check for tool calls
-            if (!aiMessage.hasToolExecutionRequests()) {
+            // Check if LLM requested tool calls
+            if (!(embabelMessage instanceof AssistantMessageWithToolCalls)) {
                 // No tools - parse and return
-                String responseText = aiMessage.text() != null ? aiMessage.text() : "";
+                String responseText = response.getTextContent() != null ? response.getTextContent() : "";
                 O output = outputParser.invoke(responseText);
                 return new ToolLoopResult<>(
                         output,
@@ -141,17 +156,76 @@ public class QuarkusToolLoop implements ToolLoop {
                         iterations,
                         Collections.emptyList(), // injectedTools
                         Collections.emptyList(), // removedTools
-                        null, // totalUsage
+                        response.getUsage(), // totalUsage
                         false, // replanRequested
                         null, // replanReason
                         blackboard -> {
                         }); // empty BlackboardUpdater
             }
 
-            // TODO: Execute tools (Step 17)
-            throw new UnsupportedOperationException("Tool execution not yet implemented");
+            // Execute tools
+            AssistantMessageWithToolCalls toolCallMessage = (AssistantMessageWithToolCalls) embabelMessage;
+            for (ToolCall toolCall : toolCallMessage.getToolCalls()) {
+                // Find tool by name
+                Tool tool = findTool(tools, toolCall.getName());
+                if (tool == null) {
+                    // Handle tool not found - add error message
+                    ToolResultMessage errorMsg = new ToolResultMessage(
+                            toolCall.getId(),
+                            toolCall.getName(),
+                            "Error: Tool '" + toolCall.getName() + "' not found");
+                    messages.add(errorMsg);
+                    continue;
+                }
+
+                // Execute tool
+                Tool.Result result = tool.call(toolCall.getArguments());
+
+                // Convert result to string
+                String resultText = resultToString(result);
+
+                // Create ToolResultMessage
+                ToolResultMessage resultMsg = new ToolResultMessage(
+                        toolCall.getId(),
+                        toolCall.getName(),
+                        resultText);
+
+                // Add to history
+                messages.add(resultMsg);
+            }
         }
 
         throw new MaxIterationsExceededException(maxIterations);
+    }
+
+    /**
+     * Find a tool by name in the list of available tools.
+     *
+     * @param tools the list of tools to search
+     * @param name the name of the tool to find
+     * @return the tool if found, null otherwise
+     */
+    private Tool findTool(List<? extends Tool> tools, String name) {
+        return tools.stream()
+                .filter(tool -> tool.getDefinition().getName().equals(name))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Convert a Tool.Result to a string representation.
+     *
+     * @param result the tool result to convert
+     * @return string representation of the result
+     */
+    private String resultToString(Tool.Result result) {
+        if (result instanceof Tool.Result.Text textResult) {
+            return textResult.getContent();
+        } else if (result instanceof Tool.Result.WithArtifact artifactResult) {
+            return artifactResult.getContent();
+        } else if (result instanceof Tool.Result.Error errorResult) {
+            return "Error: " + errorResult.getMessage();
+        }
+        return result.toString();
     }
 }

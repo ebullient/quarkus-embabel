@@ -3,20 +3,24 @@ package io.quarkiverse.embabel.agent.runtime.tool;
 import java.util.ArrayList;
 import java.util.List;
 
-import jakarta.enterprise.context.ApplicationScoped;
-
 import com.embabel.agent.api.tool.Tool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.request.json.*;
+import dev.langchain4j.model.chat.request.json.JsonArraySchema;
+import dev.langchain4j.model.chat.request.json.JsonBooleanSchema;
+import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
+import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
+import dev.langchain4j.model.chat.request.json.JsonNumberSchema;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
+import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 
 /**
  * Default implementation of ToolSpecificationConverter that converts Embabel Tool definitions
  * to LangChain4j ToolSpecification format.
  */
-@ApplicationScoped
 public class ToolSpecificationConverterImpl implements ToolSpecificationConverter {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
