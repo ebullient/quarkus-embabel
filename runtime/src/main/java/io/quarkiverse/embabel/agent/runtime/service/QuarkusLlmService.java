@@ -16,6 +16,7 @@ import com.embabel.common.ai.prompt.KnowledgeCutoffDate;
 import com.embabel.common.ai.prompt.PromptContributor;
 
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import io.quarkiverse.embabel.agent.runtime.message.MessageConverter;
 import io.quarkiverse.embabel.agent.runtime.message.MessageConverterImpl;
 import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverter;
@@ -52,6 +53,7 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
     private final String name;
     private final String provider;
     private final ChatModel chatModel;
+    private final StreamingChatModel streamingChatModel;
     private final LocalDate knowledgeCutoffDate;
     private final List<PromptContributor> promptContributors;
     private final PricingModel pricingModel;
@@ -68,7 +70,19 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
      * @param chatModel the ChatModel instance from quarkus-langchain4j
      */
     public QuarkusLlmService(String name, String provider, ChatModel chatModel) {
-        this(name, provider, chatModel, null, Collections.emptyList(), null);
+        this(name, provider, chatModel, null, null, Collections.emptyList(), null);
+    }
+
+    /**
+     * Constructor with optional streaming model support.
+     *
+     * @param name the model name
+     * @param provider the provider name
+     * @param chatModel the synchronous chat model
+     * @param streamingChatModel the streaming chat model, or null if unavailable
+     */
+    public QuarkusLlmService(String name, String provider, ChatModel chatModel, StreamingChatModel streamingChatModel) {
+        this(name, provider, chatModel, streamingChatModel, null, Collections.emptyList(), null);
     }
 
     /**
@@ -85,12 +99,14 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
             String name,
             String provider,
             ChatModel chatModel,
+            StreamingChatModel streamingChatModel,
             LocalDate knowledgeCutoffDate,
             List<PromptContributor> promptContributors,
             PricingModel pricingModel) {
         this.name = Objects.requireNonNull(name, "Model name cannot be null");
         this.provider = Objects.requireNonNull(provider, "Provider cannot be null");
         this.chatModel = Objects.requireNonNull(chatModel, "ChatModel cannot be null");
+        this.streamingChatModel = streamingChatModel;
         this.knowledgeCutoffDate = knowledgeCutoffDate;
         this.promptContributors = new ArrayList<>(promptContributors);
         this.pricingModel = pricingModel;
@@ -140,28 +156,31 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
 
     /**
      * Creates a message streamer for streaming LLM calls.
-     * <p>
-     * Streaming support will be implemented in Phase 9 (Steps 26-27).
      *
      * @param options the LLM options
      * @return a message streamer
-     * @throws UnsupportedOperationException streaming not yet implemented
+     * @throws UnsupportedOperationException if no streaming model is available
      */
     @Override
     public LlmMessageStreamer createMessageStreamer(LlmOptions options) {
-        throw new UnsupportedOperationException("Streaming support not yet implemented - Phase 9");
+        Objects.requireNonNull(options, "LlmOptions cannot be null");
+        if (streamingChatModel == null) {
+            throw new UnsupportedOperationException("Streaming support is not available for this LLM service");
+        }
+
+        MessageConverter messageConverter = new MessageConverterImpl();
+        QuarkusStreamingLlmService streamingService = new QuarkusStreamingLlmService(streamingChatModel, messageConverter);
+        return (messages, tools, toolCallInspectors) -> streamingService.streamResponse(messages);
     }
 
     /**
      * Checks if this LLM service supports streaming operations.
-     * <p>
-     * Currently returns false. Streaming support will be added in Phase 9.
      *
-     * @return false (streaming not yet supported)
+     * @return true when a streaming model is available
      */
     @Override
     public boolean supportsStreaming() {
-        return false;
+        return streamingChatModel != null;
     }
 
     /**
@@ -181,6 +200,7 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
                 name,
                 provider,
                 chatModel,
+                streamingChatModel,
                 date,
                 updatedContributors,
                 pricingModel);
@@ -201,6 +221,7 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
                 name,
                 provider,
                 chatModel,
+                streamingChatModel,
                 knowledgeCutoffDate,
                 updatedContributors,
                 pricingModel);
@@ -217,6 +238,7 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
                 name,
                 provider,
                 chatModel,
+                streamingChatModel,
                 knowledgeCutoffDate,
                 promptContributors,
                 pricingModel);
