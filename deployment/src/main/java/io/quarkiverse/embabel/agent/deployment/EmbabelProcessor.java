@@ -13,10 +13,16 @@ import org.jboss.jandex.Type;
 import com.embabel.agent.spi.LlmService;
 
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
+import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoop;
+import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
+import io.quarkiverse.embabel.agent.runtime.message.MessageConverterImpl;
+import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
 import io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService;
+import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverterImpl;
 import io.quarkiverse.langchain4j.ModelName;
 import io.quarkiverse.langchain4j.deployment.items.SelectedChatModelProviderBuildItem;
 import io.quarkiverse.langchain4j.runtime.NamedConfigUtil;
+import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
@@ -108,5 +114,39 @@ public class EmbabelProcessor {
 
             syntheticBeans.produce(configurator.done());
         }
+    }
+
+    /**
+     * Registers extension beans for CDI discovery.
+     * <p>
+     * This build step registers the core extension beans that are needed for the
+     * Embabel Agent framework to function properly in Quarkus:
+     * <ul>
+     * <li>{@link QuarkusToolLoop} - Tool execution loop implementation</li>
+     * <li>{@link QuarkusModelProvider} - Model provider for LLM and embedding service discovery</li>
+     * <li>{@link MessageConverterImpl} - Message format converter between Embabel and LangChain4j</li>
+     * <li>{@link ToolSpecificationConverterImpl} - Tool specification converter</li>
+     * </ul>
+     * <p>
+     * All beans are marked as unremovable to ensure they are available at runtime,
+     * even if not directly injected (they may be discovered via CDI Instance).
+     * <p>
+     * Note: LlmService beans are registered separately in {@link #registerLlmServiceBeans}
+     * as synthetic beans, since they are created dynamically based on quarkus-langchain4j
+     * ChatModel configuration.
+     *
+     * @param additionalBeans producer for additional bean build items
+     */
+    @BuildStep
+    void registerExtensionBeans(BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+        // Register tool loop factory
+        // QuarkusToolLoopFactory creates QuarkusToolLoop instances per-request
+        // Already has @ApplicationScoped but marked unremovable to prevent build-time removal
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(QuarkusToolLoopFactory.class));
+
+        // Register model provider
+        // QuarkusModelProvider discovers LlmService and EmbeddingService beans via CDI
+        // Already has @ApplicationScoped but marked unremovable to prevent build-time removal
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(QuarkusModelProvider.class));
     }
 }
