@@ -1,5 +1,6 @@
 package io.quarkiverse.embabel.agent.runtime.provider;
 
+import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -16,6 +17,10 @@ import com.embabel.common.ai.model.EmbeddingService;
 import com.embabel.common.ai.model.ModelMetadata;
 import com.embabel.common.ai.model.ModelProvider;
 import com.embabel.common.ai.model.ModelSelectionCriteria;
+
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import io.quarkiverse.embabel.agent.runtime.embedding.QuarkusEmbeddingService;
+import io.quarkiverse.langchain4j.ModelName;
 
 /**
  * Quarkus implementation of {@link ModelProvider} that discovers LLM and embedding services
@@ -59,6 +64,9 @@ public class QuarkusModelProvider implements ModelProvider {
 
     @Inject
     Instance<EmbeddingService> embeddingServices;
+
+    @Inject
+    Instance<EmbeddingModel> embeddingModels;
 
     private ConfigurableModelProviderProperties properties;
     private ConfigurableModelProvider delegate;
@@ -119,9 +127,53 @@ public class QuarkusModelProvider implements ModelProvider {
         llmList = new ArrayList<>();
         llmServices.forEach(llmList::add);
 
-        // Collect all EmbeddingService beans
+        // Collect all EmbeddingService beans and create wrappers for EmbeddingModel beans
         embeddingList = new ArrayList<>();
+
+        // First, add any existing EmbeddingService beans
         embeddingServices.forEach(embeddingList::add);
+
+        // Then, wrap any EmbeddingModel beans that don't have corresponding EmbeddingService beans
+        // This allows quarkus-langchain4j EmbeddingModel beans to be used directly
+        for (Instance.Handle<EmbeddingModel> handle : embeddingModels.handles()) {
+            EmbeddingModel model = handle.get();
+
+            // Determine the model name and provider from qualifiers or use defaults
+            String modelName = "unknown";
+            String provider = "unknown";
+
+            // Check for @ModelName qualifier
+            for (Annotation qualifier : handle.getBean().getQualifiers()) {
+                if (qualifier.annotationType().equals(ModelName.class)) {
+                    try {
+                        modelName = (String) qualifier.annotationType().getMethod("value").invoke(qualifier);
+                    } catch (Exception e) {
+                        // Ignore and use default
+                    }
+                }
+            }
+
+            // Infer provider from package name (e.g., dev.langchain4j.model.openai.OpenAiEmbeddingModel -> openai)
+            // This is used for display/metadata purposes only, not for routing
+            String beanClassName = handle.getBean().getBeanClass().getName();
+            if (beanClassName.startsWith("dev.langchain4j.model.")) {
+                String afterModel = beanClassName.substring("dev.langchain4j.model.".length());
+                int dotIndex = afterModel.indexOf('.');
+                if (dotIndex > 0) {
+                    provider = afterModel.substring(0, dotIndex);
+                }
+            }
+
+            // If we couldn't extract from package, use the bean class simple name
+            if (provider.equals("unknown")) {
+                provider = handle.getBean().getBeanClass().getSimpleName()
+                        .replace("EmbeddingModel", "")
+                        .toLowerCase();
+            }
+
+            // Create QuarkusEmbeddingService wrapper
+            embeddingList.add(new QuarkusEmbeddingService(modelName, provider, model));
+        }
 
         initDelegate();
     }

@@ -219,6 +219,126 @@ class QuarkusModelProviderTest {
                 .hasMessageContaining("Provider not initialized");
     }
 
+    @Test
+    void getEmbeddingService_withDefaultCriteria_returnsDefaultModel() {
+        // Given - need at least one LLM for ConfigurableModelProvider validation
+        List<LlmService<?>> llms = Collections.singletonList(gpt4Service);
+        List<EmbeddingService> embeddings = Collections.singletonList(embeddingService);
+        ConfigurableModelProviderProperties properties = createProperties("gpt-4o", "text-embedding-3-small");
+        QuarkusModelProvider provider = new QuarkusModelProvider(llms, embeddings, properties);
+
+        // When
+        EmbeddingService result = provider.getEmbeddingService(DefaultModelSelectionCriteria.INSTANCE);
+
+        // Then
+        assertThat(result).isEqualTo(embeddingService);
+        assertThat(result.getName()).isEqualTo("text-embedding-3-small");
+    }
+
+    @Test
+    void getEmbeddingService_withByNameCriteria_returnsNamedModel() {
+        // Given
+        EmbeddingService embedding2 = mock(EmbeddingService.class);
+        when(embedding2.getName()).thenReturn("text-embedding-ada-002");
+        when(embedding2.getProvider()).thenReturn("openai");
+
+        List<LlmService<?>> llms = Collections.singletonList(gpt4Service);
+        List<EmbeddingService> embeddings = Arrays.asList(embeddingService, embedding2);
+        // Set ada-002 as default so it's available, but we'll request it by name
+        ConfigurableModelProviderProperties properties = createProperties("gpt-4o", "text-embedding-ada-002");
+        QuarkusModelProvider provider = new QuarkusModelProvider(llms, embeddings, properties);
+
+        // When
+        EmbeddingService result = provider.getEmbeddingService(new ByNameModelSelectionCriteria("text-embedding-ada-002"));
+
+        // Then - verify by name, not by object reference (order may vary)
+        assertThat(result).isNotNull();
+        assertThat(result.getName()).isEqualTo("text-embedding-ada-002");
+        assertThat(result.getProvider()).isEqualTo("openai");
+    }
+
+    @Test
+    void getEmbeddingService_withByRoleCriteria_returnsRoleMappedModel() {
+        // Given
+        EmbeddingService fastEmbedding = mock(EmbeddingService.class);
+        when(fastEmbedding.getName()).thenReturn("nomic-embed-text");
+        when(fastEmbedding.getProvider()).thenReturn("ollama");
+
+        List<LlmService<?>> llms = Collections.singletonList(gpt4Service);
+        List<EmbeddingService> embeddings = Arrays.asList(embeddingService, fastEmbedding);
+        Map<String, String> embeddingRoles = new HashMap<>();
+        embeddingRoles.put("best", "text-embedding-3-small");
+        embeddingRoles.put("fast", "nomic-embed-text");
+
+        ConfigurableModelProviderProperties properties = new ConfigurableModelProviderProperties(
+                Collections.emptyMap(),
+                embeddingRoles,
+                "gpt-4o",
+                "text-embedding-3-small");
+        QuarkusModelProvider provider = new QuarkusModelProvider(llms, embeddings, properties);
+
+        // When
+        EmbeddingService bestModel = provider.getEmbeddingService(new ByRoleModelSelectionCriteria("best"));
+        EmbeddingService fastModel = provider.getEmbeddingService(new ByRoleModelSelectionCriteria("fast"));
+
+        // Then
+        assertThat(bestModel).isEqualTo(embeddingService);
+        assertThat(fastModel).isEqualTo(fastEmbedding);
+    }
+
+    @Test
+    void getEmbeddingService_withUnknownName_throwsException() {
+        // Given - no embeddings available at all
+        List<LlmService<?>> llms = Collections.singletonList(gpt4Service);
+        List<EmbeddingService> embeddings = Collections.emptyList();
+        ConfigurableModelProviderProperties properties = createProperties("gpt-4o", null);
+        QuarkusModelProvider provider = new QuarkusModelProvider(llms, embeddings, properties);
+
+        // When/Then - requesting unknown name with no embeddings throws IllegalArgumentException
+        // (ConfigurableModelProvider validates default exists during getEmbeddingService call)
+        assertThatThrownBy(() -> provider.getEmbeddingService(new ByNameModelSelectionCriteria("unknown-embedding")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Default embedding service");
+    }
+
+    @Test
+    void listModelNames_forEmbeddingService_returnsAllEmbeddingNames() {
+        // Given
+        EmbeddingService embedding2 = mock(EmbeddingService.class);
+        when(embedding2.getName()).thenReturn("nomic-embed-text");
+        when(embedding2.getProvider()).thenReturn("ollama");
+
+        List<LlmService<?>> llms = Collections.singletonList(gpt4Service);
+        List<EmbeddingService> embeddings = Arrays.asList(embeddingService, embedding2);
+        ConfigurableModelProviderProperties properties = createProperties("gpt-4o", "text-embedding-3-small");
+        QuarkusModelProvider provider = new QuarkusModelProvider(llms, embeddings, properties);
+
+        // When
+        List<String> names = provider.listModelNames(EmbeddingService.class);
+
+        // Then
+        assertThat(names).containsExactlyInAnyOrder("text-embedding-3-small", "nomic-embed-text");
+    }
+
+    @Test
+    void getEmbeddingServices_returnsAllDiscoveredServices() {
+        // Given
+        EmbeddingService embedding2 = mock(EmbeddingService.class);
+        when(embedding2.getName()).thenReturn("nomic-embed-text");
+
+        List<LlmService<?>> llms = Collections.singletonList(gpt4Service);
+        List<EmbeddingService> embeddings = Arrays.asList(embeddingService, embedding2);
+        ConfigurableModelProviderProperties properties = createProperties("gpt-4o", "text-embedding-3-small");
+        QuarkusModelProvider provider = new QuarkusModelProvider(llms, embeddings, properties);
+
+        // When
+        List<EmbeddingService> result = provider.getEmbeddingServices();
+
+        // Then
+        assertThat(result).hasSize(2);
+        assertThat(result).containsExactlyInAnyOrder(embeddingService, embedding2);
+    }
+
     // Helper methods
 
     private ConfigurableModelProviderProperties createProperties(String defaultLlm, String defaultEmbedding) {
@@ -229,10 +349,14 @@ class QuarkusModelProviderTest {
             String defaultLlm,
             String defaultEmbedding,
             Map<String, String> llmRoles) {
+        // ConfigurableModelProviderProperties requires non-null defaultLlm
+        // Use a placeholder if not provided
+        String effectiveDefaultLlm = defaultLlm != null ? defaultLlm : "placeholder-llm";
+
         ConfigurableModelProviderProperties properties = new ConfigurableModelProviderProperties(
                 llmRoles,
                 Collections.emptyMap(),
-                defaultLlm,
+                effectiveDefaultLlm,
                 defaultEmbedding);
         return properties;
     }
