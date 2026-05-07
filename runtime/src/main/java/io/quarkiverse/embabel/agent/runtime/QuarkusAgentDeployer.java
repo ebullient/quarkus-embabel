@@ -3,13 +3,12 @@ package io.quarkiverse.embabel.agent.runtime;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.jboss.logging.Logger;
 
 import com.embabel.agent.api.annotation.support.DefaultActionMethodManager;
 import com.embabel.agent.api.tool.Tool;
@@ -18,6 +17,7 @@ import com.embabel.agent.core.Agent;
 import com.embabel.agent.core.AgentScope;
 import com.embabel.agent.core.ComputedBooleanCondition;
 import com.embabel.agent.core.Condition;
+import com.embabel.agent.core.Goal;
 
 /**
  * Quarkus-native replacement for {@code AgentMetadataReader}.
@@ -33,13 +33,15 @@ import com.embabel.agent.core.Condition;
  * <li>{@link Agent} secondary constructor — assembles the final {@link AgentScope}</li>
  * </ul>
  * <p>
+ * Goals are automatically derived from {@code @Action} method return types.
+ * Each distinct non-void return type creates a goal for producing that type.
+ * <p>
  * MVP scope: {@code @AchievesGoal}, {@code @Cost} methods, and {@code @State} unrolling
- * are deferred — goals are left as an empty set.
+ * are deferred for future implementation.
  */
 class QuarkusAgentDeployer {
 
-    private static final Logger logger = LoggerFactory.getLogger(QuarkusAgentDeployer.class);
-
+    private static final Logger logger = Logger.getLogger(QuarkusAgentDeployer.class);
     private final DefaultActionMethodManager actionMethodManager = new DefaultActionMethodManager();
 
     /**
@@ -47,23 +49,25 @@ class QuarkusAgentDeployer {
      *
      * @param agentClass the actual agent class (not a CDI proxy)
      * @param agentInstance the CDI bean instance to bind action and condition methods to
+     * @param goalReturnTypeNames class names of goal return types (discovered at build time via Jandex)
      * @return a fully-wired {@link AgentScope}, or {@code null} if the class has no {@code @Agent}
      */
     @SuppressWarnings("unchecked")
-    AgentScope createAgentScope(Class<?> agentClass, Object agentInstance) {
+    AgentScope createAgentScope(Class<?> agentClass, Object agentInstance, Set<String> goalReturnTypeNames) {
         com.embabel.agent.api.annotation.Agent agentAnnotation = agentClass
                 .getAnnotation(com.embabel.agent.api.annotation.Agent.class);
         if (agentAnnotation == null) {
-            logger.warn("Class {} has no @Agent annotation — skipping", agentClass.getName());
+            logger.warnf("Class %s has no @Agent annotation — skipping", agentClass.getName());
             return null;
         }
 
         // @LlmTool discovery — zero Spring AI dependency
         List<Tool> tools = Tool.safelyFromInstance(agentInstance);
-        logger.debug("Discovered {} @LlmTool(s) on {}", tools.size(), agentClass.getSimpleName());
+        logger.debugf("Discovered %d @LlmTool(s) on %s", tools.size(), agentClass.getSimpleName());
 
         List<Action> actions = createActions(agentClass, agentInstance, tools);
         Set<Condition> conditions = createConditions(agentClass, agentInstance);
+        Set<Goal> goals = createGoalsFromReturnTypeNames(goalReturnTypeNames);
 
         String name = agentAnnotation.name().isEmpty()
                 ? agentClass.getSimpleName()
@@ -72,12 +76,12 @@ class QuarkusAgentDeployer {
                 ? agentClass.getPackage().getName()
                 : agentAnnotation.provider();
 
-        logger.debug("Building Agent '{}' with {} action(s) and {} condition(s)",
-                name, actions.size(), conditions.size());
+        logger.debugf("Building Agent '%s' with %d goal(s), %d action(s) and %d condition(s)",
+                name, goals.size(), actions.size(), conditions.size());
 
-        // @JvmOverloads secondary constructor — goals left empty (MVP scope)
+        // Build Agent with goals derived from @Action method return types (discovered at build time)
         return new Agent(name, provider, agentAnnotation.version(), agentAnnotation.description(),
-                Collections.emptySet(), actions, conditions);
+                goals, actions, conditions);
     }
 
     private List<Action> createActions(
@@ -90,11 +94,11 @@ class QuarkusAgentDeployer {
             try {
                 // Raw type: passing empty map is safe — cost method resolution is a no-op
                 Action action = actionMethodManager.createAction(
-                        method, agentInstance, tools, Collections.emptyMap());
+                        method, agentInstance, tools, Map.of());
                 actions.add(action);
-                logger.debug("Registered @Action: {}.{}", agentClass.getSimpleName(), method.getName());
+                logger.debugf("Registered @Action: %s.%s", agentClass.getSimpleName(), method.getName());
             } catch (Exception e) {
-                logger.warn("Failed to create action from {}.{}: {}",
+                logger.warnf("Failed to create action from %s.%s: %s",
                         agentClass.getSimpleName(), method.getName(), e.getMessage());
             }
         }
@@ -117,9 +121,40 @@ class QuarkusAgentDeployer {
 
             conditions.add(new ComputedBooleanCondition(condName, cost,
                     (context, condition) -> invokeConditionMethod(method, agentInstance, context)));
-            logger.debug("Registered @Condition: {}.{}", agentClass.getSimpleName(), method.getName());
+            logger.debugf("Registered @Condition: %s.%s", agentClass.getSimpleName(), method.getName());
         }
         return conditions;
+    }
+
+    /**
+     * Creates goals from pre-discovered return type class names (from build-time Jandex scan).
+     * Avoids runtime reflection and resolves classloader issues with nested classes.
+     *
+     * @param goalReturnTypeNames class names of goal return types (discovered at build time)
+     * @return set of goals derived from return type class names
+     */
+    private Set<Goal> createGoalsFromReturnTypeNames(Set<String> goalReturnTypeNames) {
+        Set<Goal> goals = new LinkedHashSet<>();
+        ClassLoader runtimeClassLoader = Thread.currentThread().getContextClassLoader();
+
+        for (String className : goalReturnTypeNames) {
+            try {
+                // Load the class using the runtime classloader
+                Class<?> returnType = runtimeClassLoader.loadClass(className);
+
+                // Create a goal for this return type
+                String goalDescription = String.format("Create %s", returnType.getSimpleName());
+                Goal goal = Goal.createInstance(goalDescription, returnType);
+                goals.add(goal);
+
+                logger.debugf("Created goal for return type: %s", returnType.getSimpleName());
+            } catch (ClassNotFoundException e) {
+                logger.warnf("Failed to load return type %s for goal creation: %s",
+                        className, e.getMessage());
+            }
+        }
+
+        return goals;
     }
 
     private boolean invokeConditionMethod(Method method, Object instance, Object context) {
@@ -127,11 +162,11 @@ class QuarkusAgentDeployer {
             return Boolean.TRUE.equals(method.invoke(instance, context));
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
-            logger.warn("@Condition {}.{} threw: {}",
+            logger.warnf("@Condition %s.%s threw: %s",
                     instance.getClass().getSimpleName(), method.getName(), cause.getMessage());
             return false;
         } catch (IllegalAccessException e) {
-            logger.warn("Cannot invoke @Condition {}.{}: {}",
+            logger.warnf("Cannot invoke @Condition %s.%s: %s",
                     instance.getClass().getSimpleName(), method.getName(), e.getMessage());
             return false;
         }

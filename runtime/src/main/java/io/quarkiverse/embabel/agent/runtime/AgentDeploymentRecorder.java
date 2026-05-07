@@ -1,11 +1,12 @@
 package io.quarkiverse.embabel.agent.runtime;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import jakarta.enterprise.inject.spi.CDI;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.jboss.logging.Logger;
 
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.AgentScope;
@@ -34,20 +35,21 @@ import io.quarkus.runtime.annotations.Recorder;
 @Recorder
 public class AgentDeploymentRecorder {
 
-    private static final Logger logger = LoggerFactory.getLogger(AgentDeploymentRecorder.class);
+    private static final Logger logger = Logger.getLogger(AgentDeploymentRecorder.class);
 
     /**
      * Deploys all discovered agent beans to the AgentPlatform.
      *
      * @param agentClassNames list of agent class names discovered at build time
+     * @param agentGoals map of agent class name to goal return type class names (discovered at build time)
      */
-    public void deployAgents(List<String> agentClassNames) {
+    public void deployAgents(List<String> agentClassNames, Map<String, Set<String>> agentGoals) {
         if (agentClassNames.isEmpty()) {
             logger.info("No agent beans discovered");
             return;
         }
 
-        logger.info("Deploying {} agent bean(s)...", agentClassNames.size());
+        logger.infof("Deploying %d agent bean(s)...", agentClassNames.size());
 
         CDI<Object> cdi = CDI.current();
         AgentPlatform agentPlatform = cdi.select(AgentPlatform.class).get();
@@ -59,21 +61,25 @@ public class AgentDeploymentRecorder {
                 Class<?> agentClass = Thread.currentThread().getContextClassLoader().loadClass(className);
                 Object agentBean = cdi.select(agentClass).get();
 
-                AgentScope agentScope = deployer.createAgentScope(agentClass, agentBean);
+                // Get pre-discovered goal return types for this agent (if any)
+                Set<String> goalReturnTypes = agentGoals.getOrDefault(className, Set.of());
+
+                AgentScope agentScope = deployer.createAgentScope(agentClass, agentBean, goalReturnTypes);
                 if (agentScope != null) {
                     agentPlatform.deploy(agentScope);
                     deployedCount++;
-                    logger.debug("Deployed agent: {} ({})", agentScope.getName(), className);
+                    logger.debugf("Deployed agent: %s (%s) with %d goal(s)",
+                            agentScope.getName(), className, goalReturnTypes.size());
                 } else {
-                    logger.warn("Skipped agent — no metadata created for: {}", className);
+                    logger.warnf("Skipped agent — no metadata created for: %s", className);
                 }
             } catch (ClassNotFoundException e) {
-                logger.error("Agent class not found: {}", className, e);
+                logger.errorf(e, "Agent class not found: %s", className);
             } catch (Exception e) {
-                logger.error("Failed to deploy agent bean: {}", className, e);
+                logger.errorf(e, "Failed to deploy agent bean: %s", className);
             }
         }
 
-        logger.info("Agent deployment complete. Deployed {} of {} agent(s)", deployedCount, agentClassNames.size());
+        logger.infof("Agent deployment complete. Deployed %d of %d agent(s)", deployedCount, agentClassNames.size());
     }
 }

@@ -1,7 +1,11 @@
 package io.quarkiverse.embabel.agent.deployment;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -45,6 +49,7 @@ public class EmbabelProcessor {
     private static final String FEATURE = "embabel-agent";
     private static final String LLM_SERVICE = "com.embabel.agent.spi.LlmService";
     private static final DotName AGENT_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Agent");
+    private static final DotName ACTION_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Action");
     private static final DotName TOOL_GROUP_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.ToolGroup");
 
     /**
@@ -63,19 +68,22 @@ public class EmbabelProcessor {
      * <p>
      * This build step scans the application for classes with the @Agent annotation
      * and registers them as CDI beans so they can be discovered by the AgentPlatform
-     * at runtime. The @Agent annotation itself defines the scope, so we don't override it.
+     * at runtime. Also discovers goal return types from @Action methods at build time.
      *
      * @param combinedIndex the combined Jandex index of all application classes
      * @param additionalBeans producer for additional bean build items
+     * @param agentGoalsProducer producer for agent goals build item
      * @return build item containing the list of discovered agent class names
      */
     @BuildStep
     AgentClassesBuildItem discoverAgents(
             CombinedIndexBuildItem combinedIndex,
-            BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+            BuildProducer<AdditionalBeanBuildItem> additionalBeans,
+            BuildProducer<AgentGoalsBuildItem> agentGoalsProducer) {
 
         IndexView index = combinedIndex.getIndex();
         List<String> agentClassNames = new ArrayList<>();
+        Map<String, Set<String>> agentGoals = new HashMap<>();
 
         // Find all classes annotated with @Agent
         for (AnnotationInstance agentAnnotation : index.getAnnotations(AGENT_ANNOTATION)) {
@@ -83,7 +91,7 @@ public class EmbabelProcessor {
             String className = agentClass.name().toString();
 
             // Register the agent class as a CDI bean
-            // Don't set a default scope - @Agent annotation already defines the scope
+            // Note: @Agent has @Component meta-annotation which Quarkus interprets as @Singleton
             additionalBeans.produce(AdditionalBeanBuildItem.builder()
                     .addBeanClass(className)
                     .setUnremovable()
@@ -91,7 +99,24 @@ public class EmbabelProcessor {
 
             // Collect class name for runtime deployment
             agentClassNames.add(className);
+
+            // Discover goals from @Action method return types
+            Set<String> goalReturnTypes = new LinkedHashSet<>();
+            agentClass.methods().stream()
+                    .filter(method -> method.hasAnnotation(ACTION_ANNOTATION))
+                    .map(method -> method.returnType())
+                    .filter(returnType -> !returnType.kind().equals(org.jboss.jandex.Type.Kind.VOID))
+                    .map(returnType -> returnType.name().toString())
+                    .distinct()
+                    .forEach(goalReturnTypes::add);
+
+            if (!goalReturnTypes.isEmpty()) {
+                agentGoals.put(className, goalReturnTypes);
+            }
         }
+
+        // Produce the agent goals build item for runtime use
+        agentGoalsProducer.produce(new AgentGoalsBuildItem(agentGoals));
 
         return new AgentClassesBuildItem(agentClassNames);
     }
@@ -138,19 +163,22 @@ public class EmbabelProcessor {
      * to the AgentPlatform during application startup. The recorder will:
      * <ol>
      * <li>Look up each agent bean from the CDI container</li>
-     * <li>Create agent metadata using AgentMetadataReader</li>
+     * <li>Create agent metadata using QuarkusAgentDeployer</li>
+     * <li>Create goals from pre-discovered return types (build-time Jandex scan)</li>
      * <li>Deploy the agent to the AgentPlatform</li>
      * </ol>
      *
      * @param recorder the recorder for runtime agent deployment
      * @param agentClasses the build item containing discovered agent class names
+     * @param agentGoals the build item containing goal return types for each agent
      */
     @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
     void deployAgents(
             AgentDeploymentRecorder recorder,
-            AgentClassesBuildItem agentClasses) {
-        recorder.deployAgents(agentClasses.getAgentClassNames());
+            AgentClassesBuildItem agentClasses,
+            AgentGoalsBuildItem agentGoals) {
+        recorder.deployAgents(agentClasses.getAgentClassNames(), agentGoals.getAgentGoals());
     }
 
     /**
