@@ -1,17 +1,21 @@
 package io.quarkiverse.embabel.agent.deployment;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
 import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.ClassType;
 import org.jboss.jandex.DotName;
+import org.jboss.jandex.IndexView;
 import org.jboss.jandex.ParameterizedType;
 import org.jboss.jandex.Type;
 
 import com.embabel.agent.spi.LlmService;
 
+import io.quarkiverse.embabel.agent.runtime.AgentDeploymentRecorder;
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoop;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
@@ -28,6 +32,7 @@ import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
+import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 
 /**
@@ -39,6 +44,8 @@ public class EmbabelProcessor {
 
     private static final String FEATURE = "embabel-agent";
     private static final String LLM_SERVICE = "com.embabel.agent.spi.LlmService";
+    private static final DotName AGENT_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Agent");
+    private static final DotName TOOL_GROUP_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.ToolGroup");
 
     /**
      * Register the embabel-agent feature with Quarkus.
@@ -49,6 +56,101 @@ public class EmbabelProcessor {
     @BuildStep
     FeatureBuildItem feature() {
         return new FeatureBuildItem(FEATURE);
+    }
+
+    /**
+     * Discovers and registers classes annotated with @Agent as CDI beans.
+     * <p>
+     * This build step scans the application for classes with the @Agent annotation
+     * and registers them as CDI beans so they can be discovered by the AgentPlatform
+     * at runtime. The @Agent annotation itself defines the scope, so we don't override it.
+     *
+     * @param combinedIndex the combined Jandex index of all application classes
+     * @param additionalBeans producer for additional bean build items
+     * @return build item containing the list of discovered agent class names
+     */
+    @BuildStep
+    AgentClassesBuildItem discoverAgents(
+            CombinedIndexBuildItem combinedIndex,
+            BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+
+        IndexView index = combinedIndex.getIndex();
+        List<String> agentClassNames = new ArrayList<>();
+
+        // Find all classes annotated with @Agent
+        for (AnnotationInstance agentAnnotation : index.getAnnotations(AGENT_ANNOTATION)) {
+            ClassInfo agentClass = agentAnnotation.target().asClass();
+            String className = agentClass.name().toString();
+
+            // Register the agent class as a CDI bean
+            // Don't set a default scope - @Agent annotation already defines the scope
+            additionalBeans.produce(AdditionalBeanBuildItem.builder()
+                    .addBeanClass(className)
+                    .setUnremovable()
+                    .build());
+
+            // Collect class name for runtime deployment
+            agentClassNames.add(className);
+        }
+
+        return new AgentClassesBuildItem(agentClassNames);
+    }
+
+    /**
+     * Discovers and registers classes annotated with @ToolGroup as CDI beans.
+     * <p>
+     * This build step scans the application for classes with the @ToolGroup annotation
+     * and registers them as ApplicationScoped CDI beans so they can be discovered by the
+     * ToolProducer's {@code Instance<ToolGroup>} injection.
+     * <p>
+     * This allows users to create custom ToolGroup implementations without needing to
+     * manually add CDI scope annotations like {@code @ApplicationScoped}.
+     *
+     * @param combinedIndex the combined Jandex index of all application classes
+     * @param additionalBeans producer for additional bean build items
+     */
+    @BuildStep
+    void discoverToolGroups(
+            CombinedIndexBuildItem combinedIndex,
+            BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+
+        IndexView index = combinedIndex.getIndex();
+
+        // Find all classes annotated with @ToolGroup
+        for (AnnotationInstance toolGroupAnnotation : index.getAnnotations(TOOL_GROUP_ANNOTATION)) {
+            ClassInfo toolGroupClass = toolGroupAnnotation.target().asClass();
+            String className = toolGroupClass.name().toString();
+
+            // Register as ApplicationScoped CDI bean
+            // @ToolGroup annotation doesn't define scope, so we set it explicitly
+            additionalBeans.produce(AdditionalBeanBuildItem.builder()
+                    .addBeanClass(className)
+                    .setDefaultScope(DotName.createSimple(ApplicationScoped.class.getName()))
+                    .setUnremovable()
+                    .build());
+        }
+    }
+
+    /**
+     * Deploys discovered agent beans to the AgentPlatform at runtime.
+     * <p>
+     * This build step uses a recorder to deploy all discovered agent beans
+     * to the AgentPlatform during application startup. The recorder will:
+     * <ol>
+     * <li>Look up each agent bean from the CDI container</li>
+     * <li>Create agent metadata using AgentMetadataReader</li>
+     * <li>Deploy the agent to the AgentPlatform</li>
+     * </ol>
+     *
+     * @param recorder the recorder for runtime agent deployment
+     * @param agentClasses the build item containing discovered agent class names
+     */
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
+    void deployAgents(
+            AgentDeploymentRecorder recorder,
+            AgentClassesBuildItem agentClasses) {
+        recorder.deployAgents(agentClasses.getAgentClassNames());
     }
 
     /**
@@ -148,5 +250,22 @@ public class EmbabelProcessor {
         // QuarkusModelProvider discovers LlmService and EmbeddingService beans via CDI
         // Already has @ApplicationScoped but marked unremovable to prevent build-time removal
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(QuarkusModelProvider.class));
+
+        // Register CDI producer classes for AgentPlatform dependencies
+        // These producers create all the beans needed by DefaultAgentPlatform
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.CoreBeansProducer.class));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.EventListenerProducer.class));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.ToolProducer.class));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.LlmOperationsProducer.class));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.AgentPlatformProducer.class));
+
+        // Note: AgentMetadataReader cannot be used in Quarkus due to Spring AI classloader issues
+        // It tries to scan for Spring AI @Tool annotations which fails in Quarkus
+        // This is a known limitation - agents must use Embabel @LlmTool annotations only
     }
 }

@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.inject.Inject;
 
-import org.jboss.shrinkwrap.api.ShrinkWrap;
-import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
@@ -15,7 +13,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService;
 import io.quarkiverse.langchain4j.ModelName;
 import io.quarkus.arc.ClientProxy;
-import io.quarkus.test.QuarkusUnitTest;
+import io.quarkus.test.QuarkusExtensionTest;
 
 /**
  * Deployment test to verify that multiple LlmService beans are properly registered
@@ -24,16 +22,15 @@ import io.quarkus.test.QuarkusUnitTest;
 class MultipleModelsTest {
 
     @RegisterExtension
-    static final QuarkusUnitTest unitTest = new QuarkusUnitTest()
-            .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class))
+    static final QuarkusExtensionTest extensionTest = new QuarkusExtensionTest()
             // Default model
-            .overrideRuntimeConfigKey("quarkus.langchain4j.openai.api-key", "test-key")
-            .overrideRuntimeConfigKey("quarkus.langchain4j.openai.chat-model.model-name", "gpt-4o")
-            .overrideRuntimeConfigKey("quarkus.langchain4j.openai.base-url", "http://localhost:8080/mock")
+            .overrideConfigKey("quarkus.langchain4j.openai.api-key", "test-key")
+            .overrideConfigKey("quarkus.langchain4j.openai.chat-model.model-name", "gpt-4o")
+            .overrideConfigKey("quarkus.langchain4j.openai.base-url", "http://localhost:8080/mock")
             // Named "fast" model
-            .overrideRuntimeConfigKey("quarkus.langchain4j.openai.fast.api-key", "test-key")
-            .overrideRuntimeConfigKey("quarkus.langchain4j.openai.fast.chat-model.model-name", "gpt-4o-mini")
-            .overrideRuntimeConfigKey("quarkus.langchain4j.openai.fast.base-url", "http://localhost:8080/mock");
+            .overrideConfigKey("quarkus.langchain4j.openai.fast.api-key", "test-key")
+            .overrideConfigKey("quarkus.langchain4j.openai.fast.chat-model.model-name", "gpt-4o-mini")
+            .overrideConfigKey("quarkus.langchain4j.openai.fast.base-url", "http://localhost:8080/mock");
 
     @Inject
     ChatModel defaultChatModel;
