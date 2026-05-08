@@ -21,6 +21,7 @@ import com.embabel.common.textio.template.TemplateRenderer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.micrometer.observation.ObservationRegistry;
+import io.quarkiverse.embabel.agent.runtime.llm.QuarkusToolLoopLlmOperations;
 import io.quarkus.arc.DefaultBean;
 
 /**
@@ -100,7 +101,7 @@ public class LlmOperationsProducer {
     }
 
     /**
-     * Produces the main {@link LlmOperations} bean using {@link ToolLoopLlmOperations}.
+     * Produces the main {@link LlmOperations} bean using {@link QuarkusToolLoopLlmOperations}.
      * <p>
      * This is the core bean that handles all LLM interactions in the agent platform.
      * It integrates:
@@ -145,7 +146,7 @@ public class LlmOperationsProducer {
             com.embabel.agent.spi.loop.ToolLoopFactory toolLoopFactory,
             AutoLlmSelectionCriteriaResolver autoLlmSelectionCriteriaResolver) {
 
-        return new ToolLoopLlmOperations(
+        return new QuarkusToolLoopLlmOperations(
                 modelProvider,
                 toolDecorator,
                 validator,
