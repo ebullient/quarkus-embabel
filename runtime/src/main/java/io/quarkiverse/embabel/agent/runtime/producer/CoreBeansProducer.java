@@ -1,10 +1,13 @@
 package io.quarkiverse.embabel.agent.runtime.producer;
 
+import java.util.Map;
 import java.util.concurrent.Executors;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Named;
+
+import org.eclipse.microprofile.config.ConfigProvider;
 
 import com.embabel.agent.api.channel.DevNullOutputChannel;
 import com.embabel.agent.api.channel.OutputChannel;
@@ -28,6 +31,7 @@ import com.embabel.agent.spi.support.InMemoryContextRepository;
 import com.embabel.agent.spi.support.LlmRanker;
 import com.embabel.agent.spi.support.ProcessOptionsOperationScheduler;
 import com.embabel.agent.spi.support.RankingProperties;
+import com.embabel.common.ai.model.ConfigurableModelProviderProperties;
 import com.embabel.common.core.NameGenerator;
 import com.embabel.common.textio.template.JinjavaTemplateRenderer;
 import com.embabel.common.textio.template.TemplateRenderer;
@@ -36,6 +40,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import io.quarkus.arc.DefaultBean;
+import io.smallrye.config.SmallRyeConfig;
 
 /**
  * CDI producer for core Embabel Agent platform beans.
@@ -253,5 +258,64 @@ public class CoreBeansProducer {
         // Use ExecutorAsyncer with virtual thread executor
         return new ExecutorAsyncer(
                 Executors.newVirtualThreadPerTaskExecutor());
+    }
+
+    /**
+     * Produces {@link ConfigurableModelProviderProperties} for model configuration.
+     * <p>
+     * <strong>Manual Configuration Binding</strong>
+     * <p>
+     * Testing revealed that quarkus-spring-boot-properties extension can create
+     * the bean automatically, but does NOT bind properties from application.properties.
+     * The bean uses Kotlin default values instead of config values.
+     * <p>
+     * Supports:
+     * <ul>
+     * <li>embabel.models.default-llm (required)</li>
+     * <li>embabel.models.default-embedding-model (optional)</li>
+     * <li>embabel.models.llms.{role}={model-name} (role mappings)</li>
+     * <li>embabel.models.embedding-services.{role}={service-name} (role mappings)</li>
+     * </ul>
+     *
+     * @return the model provider configuration properties bound from application.properties
+     */
+    @Produces
+    @ApplicationScoped
+    public ConfigurableModelProviderProperties embabelProperties() {
+        SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+
+        // Read required default LLM
+        String defaultLlm = config.getOptionalValue("embabel.models.default-llm", String.class)
+                .orElse(null);
+
+        // Read optional default embedding model
+        String defaultEmbeddingModel = config.getOptionalValue("embabel.models.default-embedding-model", String.class)
+                .orElse(null);
+
+        // Read role mappings for LLMs: embabel.models.llms.{role}={model-name}
+        Map<String, String> llms = new java.util.HashMap<>();
+        config.getPropertyNames().forEach(propertyName -> {
+            if (propertyName.startsWith("embabel.models.llms.")) {
+                String role = propertyName.substring("embabel.models.llms.".length());
+                String modelName = config.getValue(propertyName, String.class);
+                llms.put(role, modelName);
+            }
+        });
+
+        // Read role mappings for embedding services: embabel.models.embedding-services.{role}={service-name}
+        Map<String, String> embeddingServices = new java.util.HashMap<>();
+        config.getPropertyNames().forEach(propertyName -> {
+            if (propertyName.startsWith("embabel.models.embedding-services.")) {
+                String role = propertyName.substring("embabel.models.embedding-services.".length());
+                String serviceName = config.getValue(propertyName, String.class);
+                embeddingServices.put(role, serviceName);
+            }
+        });
+
+        return new ConfigurableModelProviderProperties(
+                llms,
+                embeddingServices,
+                defaultLlm,
+                defaultEmbeddingModel);
     }
 }

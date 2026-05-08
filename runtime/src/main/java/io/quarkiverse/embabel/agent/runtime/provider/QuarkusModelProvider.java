@@ -3,7 +3,6 @@ package io.quarkiverse.embabel.agent.runtime.provider;
 import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -60,7 +59,7 @@ import io.quarkiverse.langchain4j.ModelName;
 public class QuarkusModelProvider implements ModelProvider {
 
     @Inject
-    Instance<LlmService<?>> llmServices;
+    Instance<LlmService> llmServices;
 
     @Inject
     Instance<EmbeddingService> embeddingServices;
@@ -68,47 +67,10 @@ public class QuarkusModelProvider implements ModelProvider {
     @Inject
     Instance<EmbeddingModel> embeddingModels;
 
-    private ConfigurableModelProviderProperties properties;
+    @Inject
+    ConfigurableModelProviderProperties properties;
+
     private ConfigurableModelProvider delegate;
-
-    private List<LlmService<?>> llmList;
-    private List<EmbeddingService> embeddingList;
-
-    /**
-     * Default constructor for CDI.
-     * Properties will be injected or set via {@link #setProperties(ConfigurableModelProviderProperties)}.
-     */
-    public QuarkusModelProvider() {
-        // CDI requires no-arg constructor
-    }
-
-    /**
-     * Constructor for testing with explicit parameters.
-     * This allows tests to create instances without CDI when Step 18 (configuration) is blocked.
-     *
-     * @param llmServices the list of LLM services
-     * @param embeddingServices the list of embedding services
-     * @param properties the configuration properties
-     */
-    public QuarkusModelProvider(
-            List<LlmService<?>> llmServices,
-            List<EmbeddingService> embeddingServices,
-            ConfigurableModelProviderProperties properties) {
-        this.llmList = new ArrayList<>(llmServices);
-        this.embeddingList = new ArrayList<>(embeddingServices);
-        this.properties = Objects.requireNonNull(properties, "Properties cannot be null");
-        initDelegate();
-    }
-
-    /**
-     * Sets the configuration properties.
-     * This method is provided for testing when CDI injection is not available.
-     *
-     * @param properties the configuration properties
-     */
-    public void setProperties(ConfigurableModelProviderProperties properties) {
-        this.properties = Objects.requireNonNull(properties, "Properties cannot be null");
-    }
 
     /**
      * Initializes the provider by discovering all LLM and embedding service beans
@@ -118,31 +80,20 @@ public class QuarkusModelProvider implements ModelProvider {
      */
     @PostConstruct
     void init() {
-        if (properties == null) {
-            throw new IllegalStateException(
-                    "Properties not set. Either inject ConfigurableModelProviderProperties or call setProperties()");
-        }
-
-        // Collect all LlmService beans (created by Step 12's build step)
-        llmList = new ArrayList<>();
+        // Collect all LlmService beans (created by build-time bean generation)
+        List<LlmService> llmList = new ArrayList<>();
         llmServices.forEach(llmList::add);
 
-        // Collect all EmbeddingService beans and create wrappers for EmbeddingModel beans
-        embeddingList = new ArrayList<>();
-
-        // First, add any existing EmbeddingService beans
+        // Collect all EmbeddingService beans and wrap EmbeddingModel beans
+        List<EmbeddingService> embeddingList = new ArrayList<>();
         embeddingServices.forEach(embeddingList::add);
 
-        // Then, wrap any EmbeddingModel beans that don't have corresponding EmbeddingService beans
-        // This allows quarkus-langchain4j EmbeddingModel beans to be used directly
+        // Wrap any EmbeddingModel beans from quarkus-langchain4j
         for (Instance.Handle<EmbeddingModel> handle : embeddingModels.handles()) {
             EmbeddingModel model = handle.get();
 
-            // Determine the model name and provider from qualifiers or use defaults
+            // Extract model name from @ModelName qualifier, default to "unknown"
             String modelName = "unknown";
-            String provider = "unknown";
-
-            // Check for @ModelName qualifier
             for (Annotation qualifier : handle.getBean().getQualifiers()) {
                 if (qualifier.annotationType().equals(ModelName.class)) {
                     try {
@@ -153,37 +104,26 @@ public class QuarkusModelProvider implements ModelProvider {
                 }
             }
 
-            // Infer provider from package name (e.g., dev.langchain4j.model.openai.OpenAiEmbeddingModel -> openai)
-            // This is used for display/metadata purposes only, not for routing
+            // Infer provider from package name (e.g., dev.langchain4j.model.openai.* -> "openai")
+            String provider = "unknown";
             String beanClassName = handle.getBean().getBeanClass().getName();
             if (beanClassName.startsWith("dev.langchain4j.model.")) {
                 String afterModel = beanClassName.substring("dev.langchain4j.model.".length());
                 int dotIndex = afterModel.indexOf('.');
                 if (dotIndex > 0) {
                     provider = afterModel.substring(0, dotIndex);
+                } else {
+                    provider = handle.getBean().getBeanClass().getSimpleName()
+                            .replace("EmbeddingModel", "")
+                            .toLowerCase();
                 }
             }
 
-            // If we couldn't extract from package, use the bean class simple name
-            if (provider.equals("unknown")) {
-                provider = handle.getBean().getBeanClass().getSimpleName()
-                        .replace("EmbeddingModel", "")
-                        .toLowerCase();
-            }
-
-            // Create QuarkusEmbeddingService wrapper
             embeddingList.add(new QuarkusEmbeddingService(modelName, provider, model));
         }
 
-        initDelegate();
-    }
-
-    /**
-     * Initializes the delegate ConfigurableModelProvider.
-     */
-    private void initDelegate() {
         // Create delegate that handles all selection logic
-        delegate = new ConfigurableModelProvider(llmList, embeddingList, properties);
+        delegate = new ConfigurableModelProvider((List) llmList, embeddingList, properties);
     }
 
     @Override
@@ -229,27 +169,7 @@ public class QuarkusModelProvider implements ModelProvider {
      */
     private void ensureInitialized() {
         if (delegate == null) {
-            throw new IllegalStateException("Provider not initialized. Call init() or use CDI.");
+            throw new IllegalStateException("Provider not initialized. CDI @PostConstruct has not run.");
         }
-    }
-
-    /**
-     * Gets the list of discovered LLM services.
-     * Useful for testing and diagnostics.
-     *
-     * @return the list of LLM services
-     */
-    public List<LlmService<?>> getLlmServices() {
-        return llmList != null ? new ArrayList<>(llmList) : new ArrayList<>();
-    }
-
-    /**
-     * Gets the list of discovered embedding services.
-     * Useful for testing and diagnostics.
-     *
-     * @return the list of embedding services
-     */
-    public List<EmbeddingService> getEmbeddingServices() {
-        return embeddingList != null ? new ArrayList<>(embeddingList) : new ArrayList<>();
     }
 }
