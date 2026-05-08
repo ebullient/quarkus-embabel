@@ -21,13 +21,11 @@ import com.embabel.agent.spi.LlmService;
 
 import io.quarkiverse.embabel.agent.runtime.AgentDeploymentRecorder;
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
-import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoop;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
-import io.quarkiverse.embabel.agent.runtime.message.MessageConverterImpl;
 import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
 import io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService;
-import io.quarkiverse.embabel.agent.runtime.tool.ToolSpecificationConverterImpl;
 import io.quarkiverse.langchain4j.ModelName;
+import io.quarkiverse.langchain4j.deployment.RequestChatModelBeanBuildItem;
 import io.quarkiverse.langchain4j.deployment.items.SelectedChatModelProviderBuildItem;
 import io.quarkiverse.langchain4j.runtime.NamedConfigUtil;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
@@ -182,6 +180,26 @@ public class EmbabelProcessor {
     }
 
     /**
+     * Request creation of the default ChatModel bean.
+     * <p>
+     * This build step tells quarkus-langchain4j to create a default ChatModel bean
+     * even though our extension doesn't directly inject it. Instead, we wrap ChatModel
+     * instances in QuarkusLlmService beans.
+     * <p>
+     * Without this, the langchain4j core extension won't create ChatModel beans
+     * because it only creates them when there's an injection point or explicit request.
+     *
+     * @param requestChatModelProducer producer for requesting ChatModel bean creation
+     */
+    @BuildStep
+    void requestChatModel(BuildProducer<RequestChatModelBeanBuildItem> requestChatModelProducer) {
+        // Request the default ChatModel bean
+        // This ensures that at least one ChatModel is created, which our extension
+        // will then wrap in a QuarkusLlmService bean
+        requestChatModelProducer.produce(new RequestChatModelBeanBuildItem(NamedConfigUtil.DEFAULT_NAME));
+    }
+
+    /**
      * Registers LlmService beans for each configured ChatModel.
      * <p>
      * For each ChatModel bean created by quarkus-langchain4j (identified by
@@ -227,18 +245,30 @@ public class EmbabelProcessor {
             SyntheticBeanBuildItem.ExtendedBeanConfigurator configurator = SyntheticBeanBuildItem
                     .configure(QuarkusLlmService.class)
                     .addType(llmServiceType)
+                    .addType(LlmService.class) // Add raw interface type for non-parameterized injection
                     .scope(ApplicationScoped.class)
                     .setRuntimeInit()
                     .unremovable()
                     .createWith(recorder.createLlmService(configName, provider));
 
-            // Add @ModelName qualifier for named models
+            // Declare ChatModel as an injection point dependency
+            // This tells CDI that LlmService depends on ChatModel and ensures proper initialization order
             if (!NamedConfigUtil.isDefault(configName)) {
+                // Named model - inject ChatModel with @ModelName qualifier
+                configurator.addInjectionPoint(
+                        ClassType.create(DotName.createSimple("dev.langchain4j.model.chat.ChatModel")),
+                        AnnotationInstance.builder(ModelName.class)
+                                .add("value", configName)
+                                .build());
+                // Add @ModelName qualifier to the LlmService bean itself
                 configurator.addQualifier(
                         AnnotationInstance.builder(ModelName.class)
                                 .add("value", configName)
                                 .build());
             } else {
+                // Default model - inject ChatModel without qualifier
+                configurator.addInjectionPoint(
+                        ClassType.create(DotName.createSimple("dev.langchain4j.model.chat.ChatModel")));
                 configurator.defaultBean();
             }
 
@@ -249,21 +279,22 @@ public class EmbabelProcessor {
     /**
      * Registers extension beans for CDI discovery.
      * <p>
-     * This build step registers the core extension beans that are needed for the
-     * Embabel Agent framework to function properly in Quarkus:
+     * This build step registers the core extension beans and their producers:
      * <ul>
-     * <li>{@link QuarkusToolLoop} - Tool execution loop implementation</li>
-     * <li>{@link QuarkusModelProvider} - Model provider for LLM and embedding service discovery</li>
-     * <li>{@link MessageConverterImpl} - Message format converter between Embabel and LangChain4j</li>
-     * <li>{@link ToolSpecificationConverterImpl} - Tool specification converter</li>
+     * <li>{@link QuarkusToolLoopFactory} - Creates tool execution loop instances</li>
+     * <li>{@link QuarkusModelProvider} - Discovers LlmService and EmbeddingService beans via CDI</li>
+     * <li>CoreBeansProducer - Produces core Embabel beans</li>
+     * <li>EventListenerProducer - Produces event listeners for agent lifecycle</li>
+     * <li>ToolProducer - Produces tool-related beans including ToolGroupResolver</li>
+     * <li>LlmOperationsProducer - Produces LlmOperations for agent execution</li>
+     * <li>AgentPlatformProducer - Produces the AgentPlatform bean</li>
      * </ul>
      * <p>
      * All beans are marked as unremovable to ensure they are available at runtime,
      * even if not directly injected (they may be discovered via CDI Instance).
      * <p>
      * Note: LlmService beans are registered separately in {@link #registerLlmServiceBeans}
-     * as synthetic beans, since they are created dynamically based on quarkus-langchain4j
-     * ChatModel configuration.
+     * as synthetic beans, created dynamically for each ChatModel configured via quarkus-langchain4j.
      *
      * @param additionalBeans producer for additional bean build items
      */

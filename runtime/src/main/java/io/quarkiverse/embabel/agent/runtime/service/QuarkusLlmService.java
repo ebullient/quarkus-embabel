@@ -62,12 +62,12 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
      * Constructor for synthetic bean creation.
      * <p>
      * This constructor is called by the build-time recorder to create instances
-     * for each configured ChatModel. The name and provider are extracted from
-     * the quarkus-langchain4j configuration.
+     * for each configured ChatModel. CDI ensures the ChatModel bean is available
+     * before creating the LlmService bean.
      *
      * @param name the model name (e.g., "gpt-4o", "claude-3-5-sonnet")
      * @param provider the provider name (e.g., "openai", "anthropic", "ollama")
-     * @param chatModel the ChatModel instance from quarkus-langchain4j
+     * @param chatModel the ChatModel instance from quarkus-langchain4j (injected by CDI)
      */
     public QuarkusLlmService(String name, String provider, ChatModel chatModel) {
         this(name, provider, chatModel, null, null, Collections.emptyList(), null);
@@ -91,6 +91,7 @@ public class QuarkusLlmService implements LlmService<QuarkusLlmService> {
      * @param name the model name
      * @param provider the provider name
      * @param chatModel the chat language model
+     * @param streamingChatModel the streaming chat model (optional)
      * @param knowledgeCutoffDate the knowledge cutoff date (optional)
      * @param promptContributors the list of prompt contributors
      * @param pricingModel the pricing model (optional)

@@ -20,6 +20,7 @@ import com.embabel.agent.spi.ToolGroupResolver;
 
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
 import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
+import io.quarkus.arc.Arc;
 import io.quarkus.test.QuarkusExtensionTest;
 
 /**
@@ -49,7 +50,8 @@ class BeanRegistrationTest {
             // Minimal config to enable the extension
             .overrideConfigKey("quarkus.langchain4j.openai.api-key", "test-key")
             .overrideConfigKey("quarkus.langchain4j.openai.chat-model.model-name", "gpt-4o")
-            .overrideConfigKey("quarkus.langchain4j.openai.base-url", "http://localhost:8080/mock");
+            .overrideConfigKey("quarkus.langchain4j.openai.base-url", "http://localhost:8080/mock")
+            .overrideConfigKey("embabel.models.default-llm", "gpt-4o");
 
     @Inject
     QuarkusModelProvider modelProvider;
@@ -85,6 +87,18 @@ class BeanRegistrationTest {
         assertThat(toolLoopFactory)
                 .as("QuarkusToolLoopFactory should be injectable")
                 .isNotNull();
+
+        // Verify LlmService beans are resolvable
+        var llmServiceHandle = Arc.container().select(com.embabel.agent.spi.LlmService.class);
+        assertThat(llmServiceHandle.isResolvable())
+                .as("LlmService should be resolvable")
+                .isTrue();
+
+        // Verify ModelProvider can list models
+        var models = modelProvider.listModels();
+        assertThat(models)
+                .as("ModelProvider should return available models")
+                .isNotEmpty();
     }
 
     /**

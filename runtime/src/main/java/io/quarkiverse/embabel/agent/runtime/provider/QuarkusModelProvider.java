@@ -26,22 +26,22 @@ import io.quarkiverse.langchain4j.ModelName;
  * via CDI and delegates selection logic to Embabel's {@link ConfigurableModelProvider}.
  * <p>
  * This provider automatically discovers all {@link LlmService} and {@link EmbeddingService}
- * beans created by the extension's build-time bean generation (Step 12). It then uses
- * Embabel's standard configuration-based selection logic to choose the appropriate model
- * based on criteria like role or name.
+ * beans and uses Embabel's standard configuration-based selection logic to choose the
+ * appropriate model based on criteria like role or name.
  * <p>
  * <b>Architecture</b>:
  * <ol>
  * <li>Build-time: Extension creates {@link io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService}
- * beans for each configured ChatModel</li>
+ * synthetic beans for each ChatModel configured via quarkus-langchain4j</li>
  * <li>Runtime: This provider discovers all LlmService beans via CDI {@link Instance}</li>
+ * <li>Runtime: EmbeddingModel beans are wrapped in {@link QuarkusEmbeddingService} on-demand</li>
  * <li>Selection: Delegates to {@link ConfigurableModelProvider} for model selection logic</li>
  * </ol>
  * <p>
  * <b>Configuration Example</b>:
  *
  * <pre>
- * # Quarkus LangChain4j creates ChatModel beans
+ * # Quarkus LangChain4j configuration creates ChatModel beans
  * quarkus.langchain4j.openai.chat-model.model-name=gpt-4o
  * quarkus.langchain4j.openai.fast.chat-model.model-name=gpt-4o-mini
  *
@@ -80,7 +80,7 @@ public class QuarkusModelProvider implements ModelProvider {
      */
     @PostConstruct
     void init() {
-        // Collect all LlmService beans (created by build-time bean generation)
+        // Collect all LlmService beans (created by build-time synthetic bean registration)
         List<LlmService> llmList = new ArrayList<>();
         llmServices.forEach(llmList::add);
 
