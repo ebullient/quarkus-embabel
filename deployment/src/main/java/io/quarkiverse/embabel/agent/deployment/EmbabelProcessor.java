@@ -18,15 +18,19 @@ import org.jboss.jandex.ParameterizedType;
 import org.jboss.jandex.Type;
 
 import com.embabel.agent.spi.LlmService;
+import com.embabel.common.ai.model.EmbeddingService;
 
 import io.quarkiverse.embabel.agent.runtime.AgentDeploymentRecorder;
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
+import io.quarkiverse.embabel.agent.runtime.embedding.QuarkusEmbeddingService;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
 import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
 import io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService;
 import io.quarkiverse.langchain4j.ModelName;
 import io.quarkiverse.langchain4j.deployment.RequestChatModelBeanBuildItem;
+import io.quarkiverse.langchain4j.deployment.items.AutoCreateEmbeddingModelBuildItem;
 import io.quarkiverse.langchain4j.deployment.items.SelectedChatModelProviderBuildItem;
+import io.quarkiverse.langchain4j.deployment.items.SelectedEmbeddingModelCandidateBuildItem;
 import io.quarkiverse.langchain4j.runtime.NamedConfigUtil;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
@@ -45,7 +49,6 @@ import io.quarkus.deployment.builditem.FeatureBuildItem;
 public class EmbabelProcessor {
 
     private static final String FEATURE = "embabel-agent";
-    private static final String LLM_SERVICE = "com.embabel.agent.spi.LlmService";
     private static final DotName AGENT_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Agent");
     private static final DotName ACTION_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Action");
     private static final DotName TOOL_GROUP_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.ToolGroup");
@@ -200,6 +203,25 @@ public class EmbabelProcessor {
     }
 
     /**
+     * Request creation of embedding models.
+     * <p>
+     * This build step produces an {@link AutoCreateEmbeddingModelBuildItem} to ensure
+     * that quarkus-langchain4j creates EmbeddingModel beans when configured, which we
+     * will then wrap in QuarkusEmbeddingService beans.
+     * <p>
+     * This is necessary because our extension doesn't directly inject EmbeddingModel
+     * (we create synthetic beans that depend on it), so without this build item,
+     * quarkus-langchain4j wouldn't know to create the EmbeddingModel beans.
+     *
+     * @param autoCreateProducer producer for requesting EmbeddingModel bean creation
+     */
+    @BuildStep
+    void requestEmbeddingModels(BuildProducer<AutoCreateEmbeddingModelBuildItem> autoCreateProducer) {
+        // Request that quarkus-langchain4j auto-create embedding models when configured
+        autoCreateProducer.produce(new AutoCreateEmbeddingModelBuildItem());
+    }
+
+    /**
      * Registers LlmService beans for each configured ChatModel.
      * <p>
      * For each ChatModel bean created by quarkus-langchain4j (identified by
@@ -269,6 +291,80 @@ public class EmbabelProcessor {
                 // Default model - inject ChatModel without qualifier
                 configurator.addInjectionPoint(
                         ClassType.create(DotName.createSimple("dev.langchain4j.model.chat.ChatModel")));
+                configurator.defaultBean();
+            }
+
+            syntheticBeans.produce(configurator.done());
+        }
+    }
+
+    /**
+     * Registers EmbeddingService beans for each configured EmbeddingModel.
+     * <p>
+     * NOTE: This build step may not be called if quarkus-langchain4j doesn't produce
+     * SelectedEmbeddingModelCandidateBuildItem. In that case, embedding models are
+     * created as regular CDI beans and can be injected directly.
+     * <p>
+     * For each EmbeddingModel bean created by quarkus-langchain4j (identified by
+     * {@link SelectedEmbeddingModelCandidateBuildItem}), this creates a corresponding
+     * QuarkusEmbeddingService bean with the same qualifier.
+     * <p>
+     * Example configuration:
+     *
+     * <pre>
+     * # Default embedding model (no qualifier)
+     * quarkus.langchain4j.openai.api-key=${OPENAI_API_KEY}
+     * quarkus.langchain4j.openai.embedding-model.enabled=true
+     * quarkus.langchain4j.openai.embedding-model.model-name=text-embedding-3-small
+     *
+     * # Named embedding model with @ModelName("fast") qualifier
+     * quarkus.langchain4j.openai.fast.api-key=${OPENAI_API_KEY}
+     * quarkus.langchain4j.openai.fast.embedding-model.enabled=true
+     * quarkus.langchain4j.openai.fast.embedding-model.model-name=text-embedding-ada-002
+     * </pre>
+     *
+     * @param recorder the runtime recorder for creating instances
+     * @param selectedEmbeddingModels the list of configured EmbeddingModel providers
+     * @param syntheticBeans producer for synthetic bean build items
+     */
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
+    void registerEmbeddingServiceBeans(
+            LlmServiceRecorder recorder,
+            List<SelectedEmbeddingModelCandidateBuildItem> selectedEmbeddingModels,
+            BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+
+        for (SelectedEmbeddingModelCandidateBuildItem selected : selectedEmbeddingModels) {
+            String configName = selected.getConfigName();
+            String provider = selected.getProvider();
+
+            // Create corresponding EmbeddingService bean
+            SyntheticBeanBuildItem.ExtendedBeanConfigurator configurator = SyntheticBeanBuildItem
+                    .configure(QuarkusEmbeddingService.class)
+                    .addType(EmbeddingService.class)
+                    .scope(ApplicationScoped.class)
+                    .setRuntimeInit()
+                    .unremovable()
+                    .createWith(recorder.createEmbeddingService(configName, provider));
+
+            // Declare EmbeddingModel as an injection point dependency
+            // This tells CDI that EmbeddingService depends on EmbeddingModel and ensures proper initialization order
+            if (!NamedConfigUtil.isDefault(configName)) {
+                // Named model - inject EmbeddingModel with @ModelName qualifier
+                configurator.addInjectionPoint(
+                        ClassType.create(DotName.createSimple("dev.langchain4j.model.embedding.EmbeddingModel")),
+                        AnnotationInstance.builder(ModelName.class)
+                                .add("value", configName)
+                                .build());
+                // Add @ModelName qualifier to the EmbeddingService bean itself
+                configurator.addQualifier(
+                        AnnotationInstance.builder(ModelName.class)
+                                .add("value", configName)
+                                .build());
+            } else {
+                // Default model - inject EmbeddingModel without qualifier
+                configurator.addInjectionPoint(
+                        ClassType.create(DotName.createSimple("dev.langchain4j.model.embedding.EmbeddingModel")));
                 configurator.defaultBean();
             }
 

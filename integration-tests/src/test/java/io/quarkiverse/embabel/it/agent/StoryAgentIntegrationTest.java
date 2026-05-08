@@ -4,11 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.notNullValue;
 
-import jakarta.inject.Inject;
-
 import org.junit.jupiter.api.Test;
-
-import com.embabel.common.ai.model.ModelProvider;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
@@ -25,9 +21,6 @@ import io.restassured.http.ContentType;
  */
 @QuarkusTest
 class StoryAgentIntegrationTest {
-
-    @Inject
-    ModelProvider modelProvider;
 
     @Test
     void shouldCraftStoryViaRestEndpoint() {

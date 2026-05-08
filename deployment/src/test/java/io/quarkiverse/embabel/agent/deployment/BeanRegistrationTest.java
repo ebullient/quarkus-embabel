@@ -50,8 +50,11 @@ class BeanRegistrationTest {
             // Minimal config to enable the extension
             .overrideConfigKey("quarkus.langchain4j.openai.api-key", "test-key")
             .overrideConfigKey("quarkus.langchain4j.openai.chat-model.model-name", "gpt-4o")
+            .overrideConfigKey("quarkus.langchain4j.openai.embedding-model.enabled", "true")
+            .overrideConfigKey("quarkus.langchain4j.openai.embedding-model.model-name", "text-embedding-3-small")
             .overrideConfigKey("quarkus.langchain4j.openai.base-url", "http://localhost:8080/mock")
-            .overrideConfigKey("embabel.models.default-llm", "gpt-4o");
+            .overrideConfigKey("embabel.models.default-llm", "gpt-4o")
+            .overrideConfigKey("embabel.models.default-embedding-model", "text-embedding-3-small");
 
     @Inject
     QuarkusModelProvider modelProvider;
@@ -99,6 +102,45 @@ class BeanRegistrationTest {
         assertThat(models)
                 .as("ModelProvider should return available models")
                 .isNotEmpty();
+    }
+
+    /**
+     * Test that EmbeddingModel beans are discovered and wrapped in EmbeddingService.
+     * This verifies that QuarkusModelProvider properly discovers EmbeddingModel beans
+     * from quarkus-langchain4j and wraps them in QuarkusEmbeddingService.
+     */
+    @Test
+    void testEmbeddingModelDiscovery() {
+        // Verify EmbeddingService beans are resolvable
+        var embeddingServiceHandle = Arc.container().select(com.embabel.common.ai.model.EmbeddingService.class);
+        assertThat(embeddingServiceHandle.isResolvable())
+                .as("EmbeddingService should be resolvable")
+                .isTrue();
+
+        // Verify ModelProvider lists embedding models
+        var models = modelProvider.listModels();
+        var embeddingModels = models.stream()
+                .filter(m -> m.getType() == com.embabel.common.ai.model.ModelType.EMBEDDING)
+                .toList();
+
+        assertThat(embeddingModels)
+                .as("ModelProvider should return embedding models")
+                .isNotEmpty()
+                .as("Should contain the configured embedding model")
+                .anyMatch(m -> m.getName().equals("text-embedding-3-small"));
+
+        // Verify the embedding service can be retrieved
+        var embeddingService = modelProvider.getEmbeddingService(
+                com.embabel.common.ai.model.DefaultModelSelectionCriteria.INSTANCE);
+        assertThat(embeddingService)
+                .as("Default embedding service should be retrievable")
+                .isNotNull();
+        assertThat(embeddingService.getName())
+                .as("Embedding service should have correct name")
+                .isEqualTo("text-embedding-3-small");
+        assertThat(embeddingService.getProvider())
+                .as("Embedding service should have correct provider")
+                .isEqualTo("openai");
     }
 
     /**
