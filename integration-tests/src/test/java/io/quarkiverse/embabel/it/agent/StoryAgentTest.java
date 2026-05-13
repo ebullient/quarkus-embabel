@@ -23,8 +23,8 @@ class StoryAgentTest {
         // Given
         var context = FakeOperationContext.create();
         var promptRunner = (FakePromptRunner) context.promptRunner();
-        var expectedStory = new Story("Once upon a time in a magical kingdom...");
-        context.expectResponse(expectedStory);
+        var expectedText = "Once upon a time in a magical kingdom...";
+        context.expectResponse(expectedText);
 
         var agent = new StoryAgent(100);
         var userInput = new UserInput("Tell me a story about a magical kingdom", Instant.now());
@@ -34,7 +34,7 @@ class StoryAgentTest {
 
         // Then
         assertNotNull(story, "Story should not be null");
-        assertEquals(expectedStory.text(), story.text(), "Story text should match expected");
+        assertEquals(expectedText, story.text(), "Story text should match expected");
 
         // Verify the prompt was constructed correctly
         var llmInvocations = promptRunner.getLlmInvocations();
@@ -52,8 +52,8 @@ class StoryAgentTest {
     void testCraftStoryWithDifferentWordCount() {
         // Given
         var context = FakeOperationContext.create();
-        var expectedStory = new Story("A brief tale...");
-        context.expectResponse(expectedStory);
+        var expectedText = "A brief tale...";
+        context.expectResponse(expectedText);
 
         var agent = new StoryAgent(50); // Different word count
         var userInput = new UserInput("Write about adventure", Instant.now());
@@ -63,6 +63,7 @@ class StoryAgentTest {
 
         // Then
         assertNotNull(story);
+        assertEquals(expectedText, story.text());
         var promptRunner = (FakePromptRunner) context.promptRunner();
         var prompt = promptRunner.getLlmInvocations().get(0).getMessages().get(0).getContent();
         assertTrue(prompt.contains("50 words"), "Prompt should reflect custom word count");
@@ -72,15 +73,18 @@ class StoryAgentTest {
     void testPromptContainsPersona() {
         // Given
         var context = FakeOperationContext.create();
-        context.expectResponse(new Story("Test story"));
+        context.expectResponse("Test story");
 
         var agent = new StoryAgent();
         var userInput = new UserInput("Any topic", Instant.now());
 
         // When
-        agent.craftStory(userInput, context.ai());
+        var story = agent.craftStory(userInput, context.ai());
 
         // Then - verify persona is included in the prompt context
+        assertNotNull(story);
+        assertEquals("Test story", story.text());
+
         var promptRunner = (FakePromptRunner) context.promptRunner();
         var invocation = promptRunner.getLlmInvocations().get(0);
 

@@ -65,28 +65,40 @@ public class EventListenerProducer {
     /**
      * Produces an aggregated {@link AgenticEventListener} that broadcasts events to all registered listeners.
      * <p>
-     * This method discovers all {@link AgenticEventListener} beans via CDI (including the default
-     * {@link LoggingAgenticEventListener} and any user-provided listeners) and creates a composite
-     * listener that forwards events to all of them.
-     * <p>
-     * This follows the same pattern as {@link io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider}
-     * for aggregating multiple service implementations.
-     * <p>
-     * Note: This bean is named "aggregatedEventListener" to distinguish it from the individual
-     * listener implementations (LoggingAgenticEventListener, AgenticEventListenerToolsStats).
+     * Discovers all {@link AgenticEventListener} beans (including {@link LoggingAgenticEventListener}
+     * and user-provided listeners) and creates a composite listener. Filters out {@link AggregatedEventListener}
+     * to prevent circular references (CDI includes a proxy to the bean being produced, unlike Spring).
      *
-     * @param listeners CDI instance containing all registered event listeners
-     * @return an aggregated event listener that broadcasts to all listeners
+     * @param allListeners CDI instance containing all registered event listeners
+     * @return an aggregated event listener that broadcasts to all individual listeners
      */
     @Produces
     @ApplicationScoped
     @Named("aggregatedEventListener")
-    public AgenticEventListener agenticEventListener(
-            Instance<AgenticEventListener> listeners) {
+    public AggregatedEventListener agenticEventListener(
+            Instance<AgenticEventListener> allListeners) {
         List<AgenticEventListener> listenerList = new ArrayList<>();
-        listeners.forEach(listenerList::add);
-        // Access Kotlin companion object method via Companion.from()
-        return AgenticEventListener.Companion.from(listenerList);
+
+        // Filter out AggregatedEventListener to prevent circular reference
+        allListeners.stream()
+                .filter(listener -> !(listener instanceof AggregatedEventListener))
+                .forEach(listenerList::add);
+
+        // Create multicast listener and return as AggregatedEventListener
+        AgenticEventListener multicast = AgenticEventListener.Companion.from(listenerList);
+
+        // Wrap multicast listener as AggregatedEventListener to enable type-safe filtering
+        return new AggregatedEventListener() {
+            @Override
+            public void onPlatformEvent(com.embabel.agent.api.event.AgentPlatformEvent event) {
+                multicast.onPlatformEvent(event);
+            }
+
+            @Override
+            public void onProcessEvent(com.embabel.agent.api.event.AgentProcessEvent event) {
+                multicast.onProcessEvent(event);
+            }
+        };
     }
 
     /**

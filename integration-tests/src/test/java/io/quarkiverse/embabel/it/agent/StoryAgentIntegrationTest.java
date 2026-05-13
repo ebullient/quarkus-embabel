@@ -10,12 +10,16 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 
 /**
- * Integration test for StoryAgent using Quarkus Test.
+ * Integration test for WriteAndReviewAgent using Quarkus Test.
  * <p>
  * This test verifies that the Quarkus Embabel extension properly:
- * - Loads the extension and starts the application
- * - Registers CDI beans (ModelProvider, AgentPlatform)
- * - Enables agent invocation through REST endpoints
+ * <ul>
+ * <li>Loads the extension and starts the application</li>
+ * <li>Registers CDI beans (ModelProvider, AgentPlatform, agents)</li>
+ * <li>Discovers and deploys @Agent classes</li>
+ * <li>Enables single-step agent invocation (Story)</li>
+ * <li>Enables multi-step agent invocation with action chaining (ReviewedStory)</li>
+ * </ul>
  * <p>
  * Uses WireMock to mock OpenAI API calls, avoiding real API requests in tests.
  */
@@ -24,7 +28,7 @@ class StoryAgentIntegrationTest {
 
     @Test
     void shouldCraftStoryViaRestEndpoint() {
-        // When: Call the REST endpoint
+        // When: Request Story goal - framework executes craftStory() action
         given()
                 .contentType(ContentType.JSON)
                 .body("""
@@ -42,6 +46,32 @@ class StoryAgentIntegrationTest {
     }
 
     @Test
+    void shouldCraftAndReviewStoryViaRestEndpoint() {
+        // When: Request ReviewedStory goal - framework chains craftStory() → reviewStory()
+        //
+        // This test demonstrates multi-step agent invocation where the framework
+        // automatically chains actions: UserInput → craftStory() → Story → reviewStory() → ReviewedStory
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {
+                            "prompt": "Write a mystery story set in Victorian London"
+                        }
+                        """)
+                .when()
+                .post("/story/review")
+                .then()
+                .statusCode(200)
+                .contentType(ContentType.JSON)
+                // Verify ReviewedStory structure
+                .body("story", notNullValue())
+                .body("story.text", notNullValue())
+                .body("review", notNullValue())
+                .body("reviewer", notNullValue())
+                .body("reviewer.name", containsString("Review"));
+    }
+
+    @Test
     void shouldHandleEmptyPrompt() {
         // When: Call with empty prompt
         given()
@@ -56,5 +86,23 @@ class StoryAgentIntegrationTest {
                 .then()
                 .statusCode(200)
                 .body("text", notNullValue());
+    }
+
+    @Test
+    void shouldHandleSimplePromptForReview() {
+        // When: Request review with simple prompt
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {
+                            "prompt": "Adventure"
+                        }
+                        """)
+                .when()
+                .post("/story/review")
+                .then()
+                .statusCode(200)
+                .body("story.text", notNullValue())
+                .body("review", notNullValue());
     }
 }

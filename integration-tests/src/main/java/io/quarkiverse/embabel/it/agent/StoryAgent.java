@@ -38,13 +38,12 @@ public class StoryAgent {
      */
     @Action
     public Story craftStory(UserInput userInput, Ai ai) {
-        return ai
+        String text = ai
                 .withLlm(LlmOptions
                         .withAutoLlm()
                         .withTemperature(0.7))
                 .withPromptContributor(WRITER)
-                .creating(Story.class)
-                .fromPrompt(String.format("""
+                .generateText(String.format("""
                         Craft a short story in %d words or less.
                         The story should be engaging and imaginative.
                         Use the user's input as inspiration.
@@ -54,5 +53,7 @@ public class StoryAgent {
                         """,
                         wordCount,
                         userInput.getContent()).trim());
+
+        return new Story(text);
     }
 }
