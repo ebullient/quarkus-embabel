@@ -21,6 +21,7 @@ import com.embabel.agent.spi.LlmService;
 import com.embabel.common.ai.model.EmbeddingService;
 
 import io.quarkiverse.embabel.agent.runtime.AgentDeploymentRecorder;
+import io.quarkiverse.embabel.agent.runtime.GoalActionInfo;
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
 import io.quarkiverse.embabel.agent.runtime.embedding.QuarkusEmbeddingService;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
@@ -51,6 +52,8 @@ public class EmbabelProcessor {
     private static final String FEATURE = "embabel-agent";
     private static final DotName AGENT_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Agent");
     private static final DotName ACTION_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Action");
+    private static final DotName ACHIEVES_GOAL_ANNOTATION = DotName
+            .createSimple("com.embabel.agent.api.annotation.AchievesGoal");
     private static final DotName TOOL_GROUP_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.ToolGroup");
 
     /**
@@ -84,7 +87,7 @@ public class EmbabelProcessor {
 
         IndexView index = combinedIndex.getIndex();
         List<String> agentClassNames = new ArrayList<>();
-        Map<String, Set<String>> agentGoals = new HashMap<>();
+        Map<String, Set<GoalActionInfo>> agentGoalActions = new HashMap<>();
 
         // Find all classes annotated with @Agent
         for (AnnotationInstance agentAnnotation : index.getAnnotations(AGENT_ANNOTATION)) {
@@ -101,23 +104,41 @@ public class EmbabelProcessor {
             // Collect class name for runtime deployment
             agentClassNames.add(className);
 
-            // Discover goals from @Action method return types
-            Set<String> goalReturnTypes = new LinkedHashSet<>();
+            // Discover which @Action methods have @AchievesGoal annotation
+            // Store fully qualified action names and descriptions for runtime goal creation
+            Set<GoalActionInfo> goalActionSet = new LinkedHashSet<>();
+
             agentClass.methods().stream()
                     .filter(method -> method.hasAnnotation(ACTION_ANNOTATION))
-                    .map(method -> method.returnType())
-                    .filter(returnType -> !returnType.kind().equals(org.jboss.jandex.Type.Kind.VOID))
-                    .map(returnType -> returnType.name().toString())
-                    .distinct()
-                    .forEach(goalReturnTypes::add);
+                    .filter(method -> method.hasAnnotation(ACHIEVES_GOAL_ANNOTATION))
+                    .forEach(method -> {
+                        // Validate that @AchievesGoal methods have non-void return types
+                        if (method.returnType().kind().equals(Type.Kind.VOID)) {
+                            throw new IllegalStateException(
+                                    String.format(
+                                            "@AchievesGoal annotation on void method %s.%s - methods must return a value to create a goal",
+                                            className, method.name()));
+                        }
 
-            if (!goalReturnTypes.isEmpty()) {
-                agentGoals.put(className, goalReturnTypes);
+                        // Extract @AchievesGoal annotation description
+                        AnnotationInstance achievesGoalAnnotation = method.annotation(ACHIEVES_GOAL_ANNOTATION);
+                        String description = achievesGoalAnnotation.value("description") != null
+                                ? achievesGoalAnnotation.value("description").asString()
+                                : "Goal achieved by " + method.name();
+
+                        // Store fully qualified action name and description
+                        // Fully qualified name: com.example.Agent.methodName (matches Action.getName() at runtime)
+                        String fullyQualifiedName = className + "." + method.name();
+                        goalActionSet.add(new GoalActionInfo(fullyQualifiedName, description));
+                    });
+
+            if (!goalActionSet.isEmpty()) {
+                agentGoalActions.put(className, goalActionSet);
             }
         }
 
         // Produce the agent goals build item for runtime use
-        agentGoalsProducer.produce(new AgentGoalsBuildItem(agentGoals));
+        agentGoalsProducer.produce(new AgentGoalsBuildItem(agentGoalActions));
 
         return new AgentClassesBuildItem(agentClassNames);
     }
@@ -165,13 +186,13 @@ public class EmbabelProcessor {
      * <ol>
      * <li>Look up each agent bean from the CDI container</li>
      * <li>Create agent metadata using QuarkusAgentDeployer</li>
-     * <li>Create goals from pre-discovered return types (build-time Jandex scan)</li>
+     * <li>For each action with @AchievesGoal, create a goal with proper preconditions</li>
      * <li>Deploy the agent to the AgentPlatform</li>
      * </ol>
      *
      * @param recorder the recorder for runtime agent deployment
      * @param agentClasses the build item containing discovered agent class names
-     * @param agentGoals the build item containing goal return types for each agent
+     * @param agentGoals the build item containing @AchievesGoal method names for each agent
      */
     @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
@@ -179,7 +200,7 @@ public class EmbabelProcessor {
             AgentDeploymentRecorder recorder,
             AgentClassesBuildItem agentClasses,
             AgentGoalsBuildItem agentGoals) {
-        recorder.deployAgents(agentClasses.getAgentClassNames(), agentGoals.getAgentGoals());
+        recorder.deployAgents(agentClasses.getAgentClassNames(), agentGoals.getAgentGoalActions());
     }
 
     /**

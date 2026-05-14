@@ -41,9 +41,9 @@ public class AgentDeploymentRecorder {
      * Deploys all discovered agent beans to the AgentPlatform.
      *
      * @param agentClassNames list of agent class names discovered at build time
-     * @param agentGoals map of agent class name to goal return type class names (discovered at build time)
+     * @param agentGoalActions map of agent class name to set of goal action metadata
      */
-    public void deployAgents(List<String> agentClassNames, Map<String, Set<String>> agentGoals) {
+    public void deployAgents(List<String> agentClassNames, Map<String, Set<GoalActionInfo>> agentGoalActions) {
         if (agentClassNames.isEmpty()) {
             logger.info("No agent beans discovered");
             return;
@@ -61,15 +61,15 @@ public class AgentDeploymentRecorder {
                 Class<?> agentClass = Thread.currentThread().getContextClassLoader().loadClass(className);
                 Object agentBean = cdi.select(agentClass).get();
 
-                // Get pre-discovered goal return types for this agent (if any)
-                Set<String> goalReturnTypes = agentGoals.getOrDefault(className, Set.of());
+                // Get pre-discovered @AchievesGoal action metadata for this agent (if any)
+                Set<GoalActionInfo> goalActionInfos = agentGoalActions.getOrDefault(className, Set.of());
 
-                AgentScope agentScope = deployer.createAgentScope(agentClass, agentBean, goalReturnTypes);
+                AgentScope agentScope = deployer.createAgentScope(agentClass, agentBean, goalActionInfos);
                 if (agentScope != null) {
                     agentPlatform.deploy(agentScope);
                     deployedCount++;
-                    logger.debugf("Deployed agent: %s (%s) with %d goal(s)",
-                            agentScope.getName(), className, goalReturnTypes.size());
+                    logger.debugf("Deployed agent: %s (%s) with %d goal-achieving action(s)",
+                            agentScope.getName(), className, goalActionInfos.size());
                 } else {
                     logger.warnf("Skipped agent — no metadata created for: %s", className);
                 }

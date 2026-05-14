@@ -1,5 +1,6 @@
 package io.quarkiverse.embabel.it.agent;
 
+import com.embabel.agent.api.annotation.AchievesGoal;
 import com.embabel.agent.api.annotation.Action;
 import com.embabel.agent.api.annotation.Agent;
 import com.embabel.agent.api.common.Ai;
@@ -36,6 +37,7 @@ public class StoryAgent {
      * @param ai The AI builder for LLM operations
      * @return A generated story
      */
+    @AchievesGoal(description = "Story has been crafted")
     @Action
     public Story craftStory(UserInput userInput, Ai ai) {
         String text = ai

@@ -43,17 +43,18 @@ class QuarkusAgentDeployer {
 
     private static final Logger logger = Logger.getLogger(QuarkusAgentDeployer.class);
     private final DefaultActionMethodManager actionMethodManager = new DefaultActionMethodManager();
+    private final MethodDefinedOperationNameGenerator nameGenerator = new MethodDefinedOperationNameGenerator();
 
     /**
      * Builds an {@link AgentScope} from a CDI bean instance without invoking Spring AI.
      *
      * @param agentClass the actual agent class (not a CDI proxy)
      * @param agentInstance the CDI bean instance to bind action and condition methods to
-     * @param goalReturnTypeNames class names of goal return types (discovered at build time via Jandex)
+     * @param goalActionInfos goal action metadata with @AchievesGoal annotation (discovered at build time via Jandex)
      * @return a fully-wired {@link AgentScope}, or {@code null} if the class has no {@code @Agent}
      */
     @SuppressWarnings("unchecked")
-    AgentScope createAgentScope(Class<?> agentClass, Object agentInstance, Set<String> goalReturnTypeNames) {
+    AgentScope createAgentScope(Class<?> agentClass, Object agentInstance, Set<GoalActionInfo> goalActionInfos) {
         com.embabel.agent.api.annotation.Agent agentAnnotation = agentClass
                 .getAnnotation(com.embabel.agent.api.annotation.Agent.class);
         if (agentAnnotation == null) {
@@ -67,7 +68,7 @@ class QuarkusAgentDeployer {
 
         List<Action> actions = createActions(agentClass, agentInstance, tools);
         Set<Condition> conditions = createConditions(agentClass, agentInstance);
-        Set<Goal> goals = createGoalsFromReturnTypeNames(goalReturnTypeNames);
+        Set<Goal> goals = createGoalsFromActions(actions, goalActionInfos, agentInstance);
 
         String name = agentAnnotation.name().isEmpty()
                 ? agentClass.getSimpleName()
@@ -127,30 +128,102 @@ class QuarkusAgentDeployer {
     }
 
     /**
-     * Creates goals from pre-discovered return type class names (from build-time Jandex scan).
-     * Avoids runtime reflection and resolves classloader issues with nested classes.
+     * Creates goals from actions with @AchievesGoal annotation.
+     * Matches Spring Boot's AgentMetadataReader.createGoalFromActionMethod() behavior.
+     * <p>
+     * For each action with @AchievesGoal, creates a goal with:
+     * <ul>
+     * <li>Name: generated using nameGenerator (e.g., "com.example.Agent.methodName")</li>
+     * <li>Description: from @AchievesGoal annotation</li>
+     * <li>Input: the action's output binding</li>
+     * <li>Preconditions: hasRun(action) + all action preconditions (ensures action has executed and its requirements were
+     * met)</li>
+     * </ul>
      *
-     * @param goalReturnTypeNames class names of goal return types (discovered at build time)
-     * @return set of goals derived from return type class names
+     * @param actions list of actions created for this agent
+     * @param goalActionInfos goal action metadata with @AchievesGoal (discovered at build time via Jandex)
+     * @param agentInstance the agent instance for name generation
+     * @return set of goals for @AchievesGoal-annotated actions
      */
-    private Set<Goal> createGoalsFromReturnTypeNames(Set<String> goalReturnTypeNames) {
+    private Set<Goal> createGoalsFromActions(List<Action> actions, Set<GoalActionInfo> goalActionInfos,
+            Object agentInstance) {
         Set<Goal> goals = new LinkedHashSet<>();
         ClassLoader runtimeClassLoader = Thread.currentThread().getContextClassLoader();
 
-        for (String className : goalReturnTypeNames) {
-            try {
-                // Load the class using the runtime classloader
-                Class<?> returnType = runtimeClassLoader.loadClass(className);
+        // Build a map of action names to GoalActionInfo for quick lookup
+        Map<String, GoalActionInfo> infoByActionName = new java.util.HashMap<>();
+        for (GoalActionInfo info : goalActionInfos) {
+            infoByActionName.put(info.getFullyQualifiedActionName(), info);
+        }
 
-                // Create a goal for this return type
-                String goalDescription = String.format("Create %s", returnType.getSimpleName());
-                Goal goal = Goal.createInstance(goalDescription, returnType);
+        logger.debugf("Available @AchievesGoal actions from build time: %s", infoByActionName.keySet());
+
+        for (Action action : actions) {
+            String actionName = action.getName();
+            logger.debugf("Checking runtime action: %s", actionName);
+
+            // Check if this action has @AchievesGoal annotation
+            GoalActionInfo goalInfo = infoByActionName.get(actionName);
+            if (goalInfo == null) {
+                logger.debugf("No @AchievesGoal annotation found for action: %s", actionName);
+                continue;
+            }
+
+            logger.debugf("Found @AchievesGoal for action %s: %s", actionName, goalInfo.getDescription());
+
+            // Get the action's output type to create the goal
+            if (action.getOutputs().isEmpty()) {
+                logger.warnf("Action %s has @AchievesGoal but no outputs - skipping goal creation", actionName);
+                continue;
+            }
+
+            try {
+                // Extract return type from output binding format "name:type"
+                com.embabel.agent.core.IoBinding outputBinding = action.getOutputs().iterator().next();
+                String bindingValue = outputBinding.getValue();
+                String outputTypeName = bindingValue.contains(":")
+                        ? bindingValue.split(":")[1]
+                        : bindingValue;
+
+                Class<?> outputType = runtimeClassLoader.loadClass(outputTypeName);
+
+                // Generate goal name using nameGenerator (matches Spring Boot behavior)
+                // Extract method name from fully qualified action name: com.example.Agent.methodName -> methodName
+                String methodName = actionName.substring(actionName.lastIndexOf('.') + 1);
+                String goalName = nameGenerator.generateName(agentInstance, methodName);
+
+                // Create goal with hasRun precondition + action's preconditions
+                // Matches Spring Boot's: pre = setOf(Rerun.hasRunCondition(action)) + goalPreconditions
+                String hasRunPrecondition = com.embabel.agent.core.support.Rerun.INSTANCE
+                        .hasRunCondition(action);
+
+                // Exclude action's output from preconditions to avoid circular dependency
+                String outputBindingToExclude = "it:" + outputTypeName;
+                Set<String> actionPreconditions = action.getPreconditions().keySet().stream()
+                        .filter(precondition -> !precondition.equals(outputBindingToExclude))
+                        .collect(java.util.stream.Collectors.toSet());
+
+                // Combine hasRun + filtered action preconditions
+                Set<String> allPreconditions = new LinkedHashSet<>();
+                allPreconditions.add(hasRunPrecondition);
+                allPreconditions.addAll(actionPreconditions);
+
+                // Use @AchievesGoal description and generated name
+                // createInstance signature: createInstance(description, type, name, tags, examples)
+                Goal goal = Goal.createInstance(
+                        goalInfo.getDescription(), // description from @AchievesGoal
+                        outputType, // satisfiedBy type
+                        goalName) // name from nameGenerator
+                        .withPreconditions(allPreconditions.toArray(new String[0]));
+
                 goals.add(goal);
 
-                logger.debugf("Created goal for return type: %s", returnType.getSimpleName());
+                logger.debugf("Created goal '%s' for @AchievesGoal action %s: %s with %d precondition(s): %s",
+                        goalName, methodName, outputType.getSimpleName(),
+                        allPreconditions.size(), allPreconditions);
             } catch (ClassNotFoundException e) {
-                logger.warnf("Failed to load return type %s for goal creation: %s",
-                        className, e.getMessage());
+                logger.warnf("Failed to load output type for @AchievesGoal action %s: %s",
+                        actionName, e.getMessage());
             }
         }
 
