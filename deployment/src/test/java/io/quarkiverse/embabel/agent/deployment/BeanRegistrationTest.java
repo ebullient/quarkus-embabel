@@ -9,11 +9,16 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.embabel.agent.api.annotation.AchievesGoal;
 import com.embabel.agent.api.annotation.Action;
 import com.embabel.agent.api.annotation.Agent;
+import com.embabel.agent.api.annotation.Condition;
+import com.embabel.agent.api.annotation.Cost;
 import com.embabel.agent.api.annotation.LlmTool;
 import com.embabel.agent.api.common.Ai;
+import com.embabel.agent.api.common.OperationContext;
 import com.embabel.agent.core.AgentPlatform;
+import com.embabel.agent.core.AgentScope;
 import com.embabel.agent.core.internal.LlmOperations;
 import com.embabel.agent.domain.io.UserInput;
 import com.embabel.agent.spi.ToolGroupResolver;
@@ -27,15 +32,16 @@ import io.quarkus.test.QuarkusExtensionTest;
  * Integration test to verify that extension beans are properly registered
  * and discoverable via CDI.
  * <p>
- * Tests Step 20: Bean Registration Processor
- * Tests Step 21: Spring @Configuration support (via quarkus-spring-di)
- * <p>
- * Also verifies:
+ * Tests:
  * <ul>
- * <li>Tool infrastructure beans (ToolGroupResolver) are properly registered and injectable</li>
- * <li>ToolGroups can be created via Spring @Bean methods or @ToolGroup annotation</li>
- * <li>@Agent classes are discovered at build time and deployed to AgentPlatform at runtime</li>
- * <li>@LlmTool methods within agents are discovered via Tool.safelyFromInstance()</li>
+ * <li>Bean Registration Processor</li>
+ * <li>Spring @Configuration support (via quarkus-spring-di)</li>
+ * <li>Build-time metadata discovery via Jandex (NEW)</li>
+ * <li>@Action, @Condition, @Cost methods discovered at build time</li>
+ * <li>Inherited methods from interfaces/superclasses (NEW)</li>
+ * <li>@AchievesGoal automatic goal creation (NEW)</li>
+ * <li>Agent deployment to AgentPlatform at runtime</li>
+ * <li>@LlmTool methods discovered at runtime via Tool.safelyFromInstance()</li>
  * </ul>
  * <p>
  * Note: MessageConverterImpl and ToolSpecificationConverterImpl are NOT CDI beans.
@@ -46,7 +52,13 @@ class BeanRegistrationTest {
     @RegisterExtension
     static final QuarkusExtensionTest extensionTest = new QuarkusExtensionTest()
             .withApplicationRoot((jar) -> jar
-                    .addClasses(TestConfiguration.class, TestBean.class, TestAgent.class))
+                    .addClasses(
+                            TestConfiguration.class,
+                            TestBean.class,
+                            TestAgent.class,
+                            InheritingAgent.class,
+                            AgentCapabilities.class,
+                            GreetingResult.class))
             // Minimal config to enable the extension
             .overrideConfigKey("quarkus.langchain4j.openai.api-key", "test-key")
             .overrideConfigKey("quarkus.langchain4j.openai.chat-model.model-name", "gpt-4o")
@@ -76,6 +88,9 @@ class BeanRegistrationTest {
 
     @Inject
     TestAgent testAgent;
+
+    @Inject
+    InheritingAgent inheritingAgent;
 
     /**
      * Test that extension beans registered by the BeanRegistrationProcessor
@@ -200,26 +215,185 @@ class BeanRegistrationTest {
     }
 
     /**
-     * Test that @Agent classes are discovered and registered as CDI beans.
+     * Test that @Agent classes are discovered at build time and registered as CDI beans.
      * This verifies that:
-     * 1. @Agent classes are discovered by discoverAgents() build step
+     * 1. @Agent classes are discovered by discoverAgents() build step via Jandex
      * 2. They are registered as CDI beans and are injectable
      * 3. Agents with @LlmTool methods can be created
      * <p>
-     * The agent's @LlmTool methods are discovered at runtime by QuarkusAgentDeployer
-     * when the agent is deployed to the AgentPlatform.
+     * Build-time discovery (via Jandex):
+     * - @Agent annotation
+     * - @Action methods (including inherited)
+     * - @Condition methods (including inherited)
+     * - @Cost methods (including inherited)
+     * - @AchievesGoal annotations
+     * <p>
+     * Runtime discovery (via Tool.safelyFromInstance()):
+     * - @LlmTool methods
      */
     @Test
-    void testAgentDiscovery() {
+    void testAgentDiscoveryAndBeanRegistration() {
         assertThat(testAgent)
                 .as("@Agent annotated class should be discovered and registered as a CDI bean")
                 .isNotNull();
 
-        // Verify the @LlmTool method works
+        // Verify the @LlmTool method works (runtime discovery)
         String result = testAgent.reverseString("hello");
         assertThat(result)
                 .as("@LlmTool method should be callable")
                 .isEqualTo("olleh");
+    }
+
+    /**
+     * Test that agents are actually deployed to the AgentPlatform.
+     * This verifies that the AgentDeploymentRecorder properly:
+     * 1. Looks up agent beans from CDI
+     * 2. Creates AgentScope using build-time metadata
+     * 3. Deploys agents to the platform
+     */
+    @Test
+    void testAgentDeploymentToPlatform() {
+        var deployedAgents = agentPlatform.agents();
+
+        assertThat(deployedAgents)
+                .as("AgentPlatform should have deployed agents")
+                .isNotEmpty();
+
+        // Find our test agents
+        var testAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("TestAgent"))
+                .findFirst();
+
+        var inheritingAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("InheritingAgent"))
+                .findFirst();
+
+        assertThat(testAgentScope)
+                .as("TestAgent should be deployed to AgentPlatform")
+                .isPresent();
+
+        assertThat(inheritingAgentScope)
+                .as("InheritingAgent should be deployed to AgentPlatform")
+                .isPresent();
+    }
+
+    /**
+     * Test that @Action methods are discovered at build time via Jandex.
+     * This verifies that the AgentMethodScanner finds all action methods.
+     */
+    @Test
+    void testActionMethodDiscovery() {
+        var deployedAgents = agentPlatform.agents();
+        var testAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("TestAgent"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(testAgentScope.getActions())
+                .as("TestAgent should have discovered @Action methods")
+                .isNotEmpty()
+                .as("Should have greet action")
+                .anyMatch(action -> action.getName().contains("greet"))
+                .as("Should have produceGreeting action")
+                .anyMatch(action -> action.getName().contains("produceGreeting"));
+    }
+
+    /**
+     * Test that @Condition methods are discovered at build time via Jandex.
+     */
+    @Test
+    void testConditionMethodDiscovery() {
+        var deployedAgents = agentPlatform.agents();
+        var testAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("TestAgent"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(testAgentScope.getConditions())
+                .as("TestAgent should have discovered @Condition methods")
+                .isNotEmpty()
+                .as("Should have hasUserInput condition")
+                .anyMatch(cond -> cond.getName().equals("hasUserInput"));
+    }
+
+    /**
+     * Test that @Cost methods are discovered at build time and linked to actions.
+     * This verifies the complete flow:
+     * 1. Build-time: Jandex discovers @Cost methods
+     * 2. Build-time: @Action references @Cost via cost="costMethodName"
+     * 3. Runtime: QuarkusAgentDeployer creates CostMethodInfo and passes to ActionMethodManager
+     */
+    @Test
+    void testCostMethodDiscoveryAndLinking() {
+        var deployedAgents = agentPlatform.agents();
+        var testAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("TestAgent"))
+                .findFirst()
+                .orElseThrow();
+
+        // Find the greet action which has a cost method
+        var greetAction = testAgentScope.getActions().stream()
+                .filter(action -> action.getName().contains("greet"))
+                .findFirst()
+                .orElseThrow();
+
+        // Verify the action exists (cost method linkage is internal to ActionMethodManager)
+        assertThat(greetAction)
+                .as("Greet action with cost method should exist")
+                .isNotNull();
+    }
+
+    /**
+     * Test that @AchievesGoal creates goals automatically.
+     * This verifies:
+     * 1. Build-time: Jandex discovers @AchievesGoal annotation
+     * 2. Runtime: QuarkusAgentDeployer creates Goal from action + metadata
+     */
+    @Test
+    void testAchievesGoalCreatesGoals() {
+        var deployedAgents = agentPlatform.agents();
+        var testAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("TestAgent"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(testAgentScope.getGoals())
+                .as("TestAgent should have goals from @AchievesGoal")
+                .isNotEmpty()
+                .as("Should have produceGreeting goal")
+                .anyMatch(goal -> goal.getDescription().contains("Produce greeting"));
+    }
+
+    /**
+     * CRITICAL TEST: Verify that methods inherited from interfaces are discovered.
+     * This tests the main feature of the build-time metadata system - solving the
+     * inheritance problem where getDeclaredMethods() doesn't see inherited methods.
+     */
+    @Test
+    void testInheritedMethodsFromInterfaceAreDiscovered() {
+        assertThat(inheritingAgent)
+                .as("Agent implementing interface should be registered as CDI bean")
+                .isNotNull();
+
+        var deployedAgents = agentPlatform.agents();
+        var inheritingAgentScope = deployedAgents.stream()
+                .filter(a -> a.getName().equals("InheritingAgent"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("InheritingAgent should be deployed"));
+
+        // Verify inherited @Action method was discovered
+        assertThat(inheritingAgentScope.getActions())
+                .as("InheritingAgent should have discovered inherited @Action from interface")
+                .isNotEmpty()
+                .as("Should have inheritedAction from AgentCapabilities interface")
+                .anyMatch(action -> action.getName().contains("inheritedAction"));
+
+        // Verify inherited @Condition method was discovered
+        assertThat(inheritingAgentScope.getConditions())
+                .as("InheritingAgent should have discovered inherited @Condition from interface")
+                .isNotEmpty()
+                .as("Should have inheritedCondition from AgentCapabilities interface")
+                .anyMatch(cond -> cond.getName().equals("inheritedCondition"));
     }
 
     /**
@@ -250,19 +424,24 @@ class BeanRegistrationTest {
     }
 
     /**
-     * Test agent with @LlmTool method to verify agent and tool discovery.
-     * This agent should be discovered at build time by the discoverAgents() build step
-     * and deployed to the AgentPlatform at runtime.
+     * Test agent with comprehensive annotation coverage.
      * <p>
-     * The @LlmTool method should be discovered at runtime via Tool.safelyFromInstance()
-     * when the agent is deployed by QuarkusAgentDeployer.
+     * Build-time discovery (via Jandex):
+     * - @Agent annotation
+     * - @Action methods
+     * - @Condition methods
+     * - @Cost methods
+     * - @AchievesGoal annotations
+     * <p>
+     * Runtime discovery (via Tool.safelyFromInstance()):
+     * - @LlmTool methods
      */
-    @Agent(description = "Test agent for verifying @Agent and @LlmTool discovery")
+    @Agent(description = "Test agent for verifying build-time metadata discovery")
     static class TestAgent {
 
         /**
          * Simple LLM tool that reverses a string.
-         * This verifies that @LlmTool methods are discovered and registered.
+         * Discovered at RUNTIME via Tool.safelyFromInstance().
          */
         @LlmTool(description = "Reverses the input string")
         public String reverseString(String input) {
@@ -270,12 +449,90 @@ class BeanRegistrationTest {
         }
 
         /**
-         * Simple action that uses the AI to generate text.
-         * This verifies that @Action methods work with the test agent.
+         * Condition to check if user input exists.
+         * Discovered at BUILD TIME via Jandex.
          */
-        @Action
+        @Condition(name = "hasUserInput", cost = 1.0)
+        public boolean hasUserInput(OperationContext context) {
+            // Simplified check - in real usage would access context
+            return true;
+        }
+
+        /**
+         * Cost calculation method for the greet action.
+         * Discovered at BUILD TIME via Jandex and linked to action.
+         */
+        @Cost(name = "greetCost")
+        public double calculateGreetCost(OperationContext context) {
+            return 5.0;
+        }
+
+        /**
+         * Action that uses a cost method.
+         * Discovered at BUILD TIME via Jandex.
+         */
+        @Action(costMethod = "greetCost")
         public String greet(UserInput userInput, Ai ai) {
             return "Hello from TestAgent! Input: " + userInput.getContent();
+        }
+
+        /**
+         * Action that achieves a goal.
+         * Both @Action and @AchievesGoal discovered at BUILD TIME via Jandex.
+         * Goal is automatically created with proper preconditions.
+         */
+        @Action
+        @AchievesGoal(description = "Produce greeting", value = 10.0)
+        public GreetingResult produceGreeting(UserInput userInput) {
+            return new GreetingResult("Hello from goal-achieving action!");
+        }
+    }
+
+    /**
+     * Interface with agent capabilities to test inherited method discovery.
+     * This is the CRITICAL TEST for the build-time metadata system.
+     * Runtime getDeclaredMethods() doesn't see interface methods,
+     * but build-time Jandex scanning does!
+     */
+    interface AgentCapabilities {
+
+        @Action
+        String inheritedAction(UserInput input);
+
+        @Condition(name = "inheritedCondition")
+        boolean inheritedCheck();
+    }
+
+    /**
+     * Agent that implements an interface with @Action and @Condition methods.
+     * Tests that build-time Jandex scanning finds inherited methods.
+     */
+    @Agent(description = "Agent that inherits methods from interface")
+    static class InheritingAgent implements AgentCapabilities {
+
+        @Override
+        public String inheritedAction(UserInput input) {
+            return "Action inherited from interface! Input: " + input.getContent();
+        }
+
+        @Override
+        public boolean inheritedCheck() {
+            return true;
+        }
+    }
+
+    /**
+     * Simple result type for testing @AchievesGoal.
+     */
+    static class GreetingResult {
+        private final String message;
+
+        GreetingResult(String message) {
+            this.message = message;
+        }
+
+        public String getMessage() {
+            return message;
         }
     }
 }

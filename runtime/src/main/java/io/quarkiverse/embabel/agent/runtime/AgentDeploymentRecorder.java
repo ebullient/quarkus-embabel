@@ -2,7 +2,6 @@ package io.quarkiverse.embabel.agent.runtime;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import jakarta.enterprise.inject.spi.CDI;
 
@@ -41,9 +40,15 @@ public class AgentDeploymentRecorder {
      * Deploys all discovered agent beans to the AgentPlatform.
      *
      * @param agentClassNames list of agent class names discovered at build time
-     * @param agentGoalActions map of agent class name to set of goal action metadata
+     * @param actionMethodsByAgent map of agent class name to action method metadata
+     * @param conditionMethodsByAgent map of agent class name to condition method metadata
+     * @param costMethodsByAgent map of agent class name to cost method metadata
      */
-    public void deployAgents(List<String> agentClassNames, Map<String, Set<GoalActionInfo>> agentGoalActions) {
+    public void deployAgents(
+            List<String> agentClassNames,
+            Map<String, List<ActionMethodBuildInfo>> actionMethodsByAgent,
+            Map<String, List<ConditionMethodBuildInfo>> conditionMethodsByAgent,
+            Map<String, List<CostMethodBuildInfo>> costMethodsByAgent) {
         if (agentClassNames.isEmpty()) {
             logger.info("No agent beans discovered");
             return;
@@ -61,15 +66,25 @@ public class AgentDeploymentRecorder {
                 Class<?> agentClass = Thread.currentThread().getContextClassLoader().loadClass(className);
                 Object agentBean = cdi.select(agentClass).get();
 
-                // Get pre-discovered @AchievesGoal action metadata for this agent (if any)
-                Set<GoalActionInfo> goalActionInfos = agentGoalActions.getOrDefault(className, Set.of());
+                // Get comprehensive pre-discovered metadata for this agent
+                List<ActionMethodBuildInfo> actionMethods = actionMethodsByAgent.getOrDefault(className, List.of());
+                List<ConditionMethodBuildInfo> conditionMethods = conditionMethodsByAgent.getOrDefault(className,
+                        List.of());
+                List<CostMethodBuildInfo> costMethods = costMethodsByAgent.getOrDefault(className, List.of());
 
-                AgentScope agentScope = deployer.createAgentScope(agentClass, agentBean, goalActionInfos);
+                AgentScope agentScope = deployer.createAgentScope(
+                        agentClass,
+                        agentBean,
+                        actionMethods,
+                        conditionMethods,
+                        costMethods);
+
                 if (agentScope != null) {
                     agentPlatform.deploy(agentScope);
                     deployedCount++;
-                    logger.debugf("Deployed agent: %s (%s) with %d goal-achieving action(s)",
-                            agentScope.getName(), className, goalActionInfos.size());
+                    logger.debugf("Deployed agent: %s (%s) with %d action(s), %d condition(s), %d cost method(s)",
+                            agentScope.getName(), className,
+                            actionMethods.size(), conditionMethods.size(), costMethods.size());
                 } else {
                     logger.warnf("Skipped agent — no metadata created for: %s", className);
                 }

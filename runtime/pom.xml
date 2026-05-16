@@ -39,9 +39,41 @@
                     <groupId>ch.qos.logback</groupId>
                     <artifactId>logback-classic</artifactId>
                 </exclusion>
+                <!-- Exclude Spring AI - we use Quarkus LangChain4j instead -->
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
-        
+        <!-- Reactor needed by embabel for streaming, but exclude Spring AI transitive deps -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
+        <!-- Spring Retry needed by embabel for RetryTemplate -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+        </dependency>
+        <!-- JSON Schema generator needed by embabel for tool input schemas -->
+        <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-generator</artifactId>
+        </dependency>
+        <!-- Spring AI Retry - minimal dependency for TransientAiException marker used by SpringAiRetryPolicy -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-retry</artifactId>
+            <exclusions>
+                <!-- Exclude spring-ai-core to avoid loading SpringAiToolExtractor -->
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>io.quarkus</groupId>

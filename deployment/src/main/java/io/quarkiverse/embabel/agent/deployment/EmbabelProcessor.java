@@ -2,10 +2,8 @@ package io.quarkiverse.embabel.agent.deployment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -20,8 +18,10 @@ import org.jboss.jandex.Type;
 import com.embabel.agent.spi.LlmService;
 import com.embabel.common.ai.model.EmbeddingService;
 
+import io.quarkiverse.embabel.agent.runtime.ActionMethodBuildInfo;
 import io.quarkiverse.embabel.agent.runtime.AgentDeploymentRecorder;
-import io.quarkiverse.embabel.agent.runtime.GoalActionInfo;
+import io.quarkiverse.embabel.agent.runtime.ConditionMethodBuildInfo;
+import io.quarkiverse.embabel.agent.runtime.CostMethodBuildInfo;
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
 import io.quarkiverse.embabel.agent.runtime.embedding.QuarkusEmbeddingService;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
@@ -71,23 +71,29 @@ public class EmbabelProcessor {
      * Discovers and registers classes annotated with @Agent as CDI beans.
      * <p>
      * This build step scans the application for classes with the @Agent annotation
-     * and registers them as CDI beans so they can be discovered by the AgentPlatform
-     * at runtime. Also discovers goal return types from @Action methods at build time.
+     * and registers them as CDI beans. It also performs comprehensive metadata collection
+     * using Jandex, including scanning the full class hierarchy (interfaces, superclasses)
+     * for @Action, @Condition, and @Cost methods.
      *
      * @param combinedIndex the combined Jandex index of all application classes
      * @param additionalBeans producer for additional bean build items
-     * @param agentGoalsProducer producer for agent goals build item
+     * @param agentMetadataProducer producer for comprehensive agent metadata
      * @return build item containing the list of discovered agent class names
      */
     @BuildStep
     AgentClassesBuildItem discoverAgents(
             CombinedIndexBuildItem combinedIndex,
             BuildProducer<AdditionalBeanBuildItem> additionalBeans,
-            BuildProducer<AgentGoalsBuildItem> agentGoalsProducer) {
+            BuildProducer<AgentMetadataBuildItem> agentMetadataProducer) {
 
         IndexView index = combinedIndex.getIndex();
         List<String> agentClassNames = new ArrayList<>();
-        Map<String, Set<GoalActionInfo>> agentGoalActions = new HashMap<>();
+        AgentMethodScanner scanner = new AgentMethodScanner(index);
+
+        // Storage for comprehensive metadata
+        Map<String, List<ActionMethodBuildInfo>> actionMethodsByAgent = new HashMap<>();
+        Map<String, List<ConditionMethodBuildInfo>> conditionMethodsByAgent = new HashMap<>();
+        Map<String, List<CostMethodBuildInfo>> costMethodsByAgent = new HashMap<>();
 
         // Find all classes annotated with @Agent
         for (AnnotationInstance agentAnnotation : index.getAnnotations(AGENT_ANNOTATION)) {
@@ -104,41 +110,28 @@ public class EmbabelProcessor {
             // Collect class name for runtime deployment
             agentClassNames.add(className);
 
-            // Discover which @Action methods have @AchievesGoal annotation
-            // Store fully qualified action names and descriptions for runtime goal creation
-            Set<GoalActionInfo> goalActionSet = new LinkedHashSet<>();
+            // Scan the full class hierarchy for annotated methods
+            // This includes methods from interfaces and superclasses that getDeclaredMethods() would miss
+            List<ActionMethodBuildInfo> actionMethods = scanner.scanActionMethods(agentClass);
+            List<ConditionMethodBuildInfo> conditionMethods = scanner.scanConditionMethods(agentClass);
+            List<CostMethodBuildInfo> costMethods = scanner.scanCostMethods(agentClass);
 
-            agentClass.methods().stream()
-                    .filter(method -> method.hasAnnotation(ACTION_ANNOTATION))
-                    .filter(method -> method.hasAnnotation(ACHIEVES_GOAL_ANNOTATION))
-                    .forEach(method -> {
-                        // Validate that @AchievesGoal methods have non-void return types
-                        if (method.returnType().kind().equals(Type.Kind.VOID)) {
-                            throw new IllegalStateException(
-                                    String.format(
-                                            "@AchievesGoal annotation on void method %s.%s - methods must return a value to create a goal",
-                                            className, method.name()));
-                        }
-
-                        // Extract @AchievesGoal annotation description
-                        AnnotationInstance achievesGoalAnnotation = method.annotation(ACHIEVES_GOAL_ANNOTATION);
-                        String description = achievesGoalAnnotation.value("description") != null
-                                ? achievesGoalAnnotation.value("description").asString()
-                                : "Goal achieved by " + method.name();
-
-                        // Store fully qualified action name and description
-                        // Fully qualified name: com.example.Agent.methodName (matches Action.getName() at runtime)
-                        String fullyQualifiedName = className + "." + method.name();
-                        goalActionSet.add(new GoalActionInfo(fullyQualifiedName, description));
-                    });
-
-            if (!goalActionSet.isEmpty()) {
-                agentGoalActions.put(className, goalActionSet);
+            if (!actionMethods.isEmpty()) {
+                actionMethodsByAgent.put(className, actionMethods);
+            }
+            if (!conditionMethods.isEmpty()) {
+                conditionMethodsByAgent.put(className, conditionMethods);
+            }
+            if (!costMethods.isEmpty()) {
+                costMethodsByAgent.put(className, costMethods);
             }
         }
 
-        // Produce the agent goals build item for runtime use
-        agentGoalsProducer.produce(new AgentGoalsBuildItem(agentGoalActions));
+        // Produce comprehensive metadata build item for runtime use
+        agentMetadataProducer.produce(new AgentMetadataBuildItem(
+                actionMethodsByAgent,
+                conditionMethodsByAgent,
+                costMethodsByAgent));
 
         return new AgentClassesBuildItem(agentClassNames);
     }
@@ -185,22 +178,37 @@ public class EmbabelProcessor {
      * to the AgentPlatform during application startup. The recorder will:
      * <ol>
      * <li>Look up each agent bean from the CDI container</li>
-     * <li>Create agent metadata using QuarkusAgentDeployer</li>
-     * <li>For each action with @AchievesGoal, create a goal with proper preconditions</li>
+     * <li>Create agent metadata using QuarkusAgentDeployer with build-time metadata</li>
+     * <li>Build actions, conditions, and goals from pre-scanned metadata</li>
      * <li>Deploy the agent to the AgentPlatform</li>
      * </ol>
      *
      * @param recorder the recorder for runtime agent deployment
      * @param agentClasses the build item containing discovered agent class names
-     * @param agentGoals the build item containing @AchievesGoal method names for each agent
+     * @param agentMetadata comprehensive metadata about all agent methods
      */
     @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
     void deployAgents(
             AgentDeploymentRecorder recorder,
             AgentClassesBuildItem agentClasses,
-            AgentGoalsBuildItem agentGoals) {
-        recorder.deployAgents(agentClasses.getAgentClassNames(), agentGoals.getAgentGoalActions());
+            AgentMetadataBuildItem agentMetadata) {
+        // Extract data from build item - recorders can't receive build items directly
+        Map<String, List<ActionMethodBuildInfo>> actionMethodsByAgent = new HashMap<>();
+        Map<String, List<ConditionMethodBuildInfo>> conditionMethodsByAgent = new HashMap<>();
+        Map<String, List<CostMethodBuildInfo>> costMethodsByAgent = new HashMap<>();
+
+        for (String className : agentClasses.getAgentClassNames()) {
+            actionMethodsByAgent.put(className, agentMetadata.getActionMethods(className));
+            conditionMethodsByAgent.put(className, agentMetadata.getConditionMethods(className));
+            costMethodsByAgent.put(className, agentMetadata.getCostMethods(className));
+        }
+
+        recorder.deployAgents(
+                agentClasses.getAgentClassNames(),
+                actionMethodsByAgent,
+                conditionMethodsByAgent,
+                costMethodsByAgent);
     }
 
     /**
@@ -439,9 +447,5 @@ public class EmbabelProcessor {
                 io.quarkiverse.embabel.agent.runtime.producer.LlmOperationsProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.AgentPlatformProducer.class));
-
-        // Note: AgentMetadataReader cannot be used in Quarkus due to Spring AI classloader issues
-        // It tries to scan for Spring AI @Tool annotations which fails in Quarkus
-        // This is a known limitation - agents must use Embabel @LlmTool annotations only
     }
 }

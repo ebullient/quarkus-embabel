@@ -10,7 +10,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.embabel.agent.api.channel.OutputChannel;
 import com.embabel.agent.api.common.Asyncer;
-import com.embabel.agent.api.event.AgenticEventListener;
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.AgentProcessRepository;
 import com.embabel.agent.core.expression.LogicalExpressionParser;
@@ -77,8 +76,7 @@ public class AgentPlatformProducer {
     ToolGroupResolver toolGroupResolver;
 
     @Inject
-    @Named("aggregatedEventListener")
-    AgenticEventListener eventListener;
+    AggregatedEventListener eventListener;
 
     @Inject
     AgentProcessIdGenerator agentProcessIdGenerator;

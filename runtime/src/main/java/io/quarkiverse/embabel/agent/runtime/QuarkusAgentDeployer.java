@@ -3,6 +3,7 @@ package io.quarkiverse.embabel.agent.runtime;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.Set;
 
 import org.jboss.logging.Logger;
 
+import com.embabel.agent.api.annotation.support.CostMethodInfo;
 import com.embabel.agent.api.annotation.support.DefaultActionMethodManager;
 import com.embabel.agent.api.tool.Tool;
 import com.embabel.agent.core.Action;
@@ -18,26 +20,19 @@ import com.embabel.agent.core.AgentScope;
 import com.embabel.agent.core.ComputedBooleanCondition;
 import com.embabel.agent.core.Condition;
 import com.embabel.agent.core.Goal;
+import com.embabel.agent.core.support.Rerun;
 
 /**
  * Quarkus-native replacement for {@code AgentMetadataReader}.
  * <p>
- * {@code AgentMetadataReader} calls Spring AI's {@code ToolCallbacks.from()} internally,
- * which throws {@code IllegalAccessError} in Quarkus due to JVM module visibility restrictions.
- * This class produces the same {@link AgentScope} result using only Embabel's
- * framework-agnostic SPIs, none of which touch Spring AI:
+ * Uses build-time Jandex metadata instead of runtime reflection to build agent metadata.
+ * This approach:
  * <ul>
- * <li>{@link Tool#safelyFromInstance(Object)} — scans for {@code @LlmTool} methods</li>
- * <li>{@link DefaultActionMethodManager} — builds {@link com.embabel.agent.core.Action} objects</li>
- * <li>{@link ComputedBooleanCondition} — wraps {@code @Condition} methods</li>
- * <li>{@link Agent} secondary constructor — assembles the final {@link AgentScope}</li>
+ * <li>Solves the inheritance problem - Jandex sees all methods, getDeclaredMethods() doesn't</li>
+ * <li>Eliminates redundant annotation scanning - already done at build time</li>
+ * <li>Avoids Spring AI classloader issues with ToolCallbacks.from()</li>
+ * <li>Uses only Embabel's framework-agnostic SPIs</li>
  * </ul>
- * <p>
- * Goals are automatically derived from {@code @Action} method return types.
- * Each distinct non-void return type creates a goal for producing that type.
- * <p>
- * MVP scope: {@code @AchievesGoal}, {@code @Cost} methods, and {@code @State} unrolling
- * are deferred for future implementation.
  */
 class QuarkusAgentDeployer {
 
@@ -46,15 +41,22 @@ class QuarkusAgentDeployer {
     private final MethodDefinedOperationNameGenerator nameGenerator = new MethodDefinedOperationNameGenerator();
 
     /**
-     * Builds an {@link AgentScope} from a CDI bean instance without invoking Spring AI.
+     * Builds an {@link AgentScope} from a CDI bean instance using build-time metadata.
      *
      * @param agentClass the actual agent class (not a CDI proxy)
      * @param agentInstance the CDI bean instance to bind action and condition methods to
-     * @param goalActionInfos goal action metadata with @AchievesGoal annotation (discovered at build time via Jandex)
+     * @param actionMethods build-time metadata for @Action methods (includes inherited from interfaces/superclasses)
+     * @param conditionMethods build-time metadata for @Condition methods
+     * @param costMethods build-time metadata for @Cost methods
      * @return a fully-wired {@link AgentScope}, or {@code null} if the class has no {@code @Agent}
      */
-    @SuppressWarnings("unchecked")
-    AgentScope createAgentScope(Class<?> agentClass, Object agentInstance, Set<GoalActionInfo> goalActionInfos) {
+    AgentScope createAgentScope(
+            Class<?> agentClass,
+            Object agentInstance,
+            List<ActionMethodBuildInfo> actionMethods,
+            List<ConditionMethodBuildInfo> conditionMethods,
+            List<CostMethodBuildInfo> costMethods) {
+
         com.embabel.agent.api.annotation.Agent agentAnnotation = agentClass
                 .getAnnotation(com.embabel.agent.api.annotation.Agent.class);
         if (agentAnnotation == null) {
@@ -62,13 +64,22 @@ class QuarkusAgentDeployer {
             return null;
         }
 
-        // @LlmTool discovery — zero Spring AI dependency
-        List<Tool> tools = Tool.safelyFromInstance(agentInstance);
-        logger.debugf("Discovered %d @LlmTool(s) on %s", tools.size(), agentClass.getSimpleName());
+        // Discover tools on the agent instance
+        List<Tool> toolsOnInstance = Tool.safelyFromInstance(agentInstance);
+        logger.debugf("Discovered %d tool(s) on agent instance %s", toolsOnInstance.size(), agentClass.getSimpleName());
 
-        List<Action> actions = createActions(agentClass, agentInstance, tools);
-        Set<Condition> conditions = createConditions(agentClass, agentInstance);
-        Set<Goal> goals = createGoalsFromActions(actions, goalActionInfos, agentInstance);
+        // Build cost method lookup map
+        Map<String, CostMethodInfo> costMethodMap = buildCostMethodMap(agentClass, agentInstance, costMethods);
+
+        // Build actions from metadata
+        List<Action> actions = createActionsFromMetadata(
+                agentClass, agentInstance, actionMethods, toolsOnInstance, costMethodMap);
+
+        // Build conditions from metadata
+        Set<Condition> conditions = createConditionsFromMetadata(agentClass, agentInstance, conditionMethods);
+
+        // Build goals from actions with @AchievesGoal
+        Set<Goal> goals = createGoalsFromMetadata(actions, actionMethods, agentInstance);
 
         String name = agentAnnotation.name().isEmpty()
                 ? agentClass.getSimpleName()
@@ -77,99 +88,201 @@ class QuarkusAgentDeployer {
                 ? agentClass.getPackage().getName()
                 : agentAnnotation.provider();
 
-        logger.debugf("Building Agent '%s' with %d goal(s), %d action(s) and %d condition(s)",
+        logger.debugf("Building Agent '%s' with %d goal(s), %d action(s), %d condition(s)",
                 name, goals.size(), actions.size(), conditions.size());
 
-        // Build Agent with goals derived from @Action method return types (discovered at build time)
         return new Agent(name, provider, agentAnnotation.version(), agentAnnotation.description(),
                 goals, actions, conditions);
     }
 
-    private List<Action> createActions(
-            Class<?> agentClass, Object agentInstance, List<Tool> tools) {
-        List<Action> actions = new ArrayList<>();
-        for (Method method : agentClass.getDeclaredMethods()) {
-            if (!method.isAnnotationPresent(com.embabel.agent.api.annotation.Action.class)) {
-                continue;
-            }
+    /**
+     * Build cost method lookup map from build-time metadata.
+     */
+    private Map<String, CostMethodInfo> buildCostMethodMap(
+            Class<?> agentClass,
+            Object agentInstance,
+            List<CostMethodBuildInfo> costMethodsMetadata) {
+
+        Map<String, CostMethodInfo> costMethodMap = new HashMap<>();
+
+        for (CostMethodBuildInfo costInfo : costMethodsMetadata) {
             try {
-                // Raw type: passing empty map is safe — cost method resolution is a no-op
-                Action action = actionMethodManager.createAction(
-                        method, agentInstance, tools, Map.of());
-                actions.add(action);
-                logger.debugf("Registered @Action: %s.%s", agentClass.getSimpleName(), method.getName());
+                // Find method on the class where it was declared (may be interface/superclass)
+                Class<?> declaringClass = Thread.currentThread().getContextClassLoader()
+                        .loadClass(costInfo.getClassName());
+                Method method = findMethod(declaringClass, costInfo.getMethodName(), costInfo.getParameters());
+                if (method != null) {
+                    method.setAccessible(true);
+                    costMethodMap.put(costInfo.getCostName(), new CostMethodInfo(method, agentInstance));
+                    logger.debugf("Registered @Cost: %s [%s]", costInfo.getMethodName(), costInfo.getCostName());
+                } else {
+                    logger.warnf("Could not find @Cost method: %s.%s", costInfo.getClassName(),
+                            costInfo.getMethodName());
+                }
             } catch (Exception e) {
-                logger.warnf("Failed to create action from %s.%s: %s",
-                        agentClass.getSimpleName(), method.getName(), e.getMessage());
+                logger.warnf("Failed to register @Cost method %s: %s", costInfo.getMethodName(), e.getMessage());
             }
         }
+
+        return costMethodMap;
+    }
+
+    /**
+     * Create actions from build-time metadata instead of scanning at runtime.
+     */
+    private List<Action> createActionsFromMetadata(
+            Class<?> agentClass,
+            Object agentInstance,
+            List<ActionMethodBuildInfo> actionMethodsMetadata,
+            List<Tool> toolsOnInstance,
+            Map<String, CostMethodInfo> costMethodMap) {
+
+        List<Action> actions = new ArrayList<>();
+
+        for (ActionMethodBuildInfo actionInfo : actionMethodsMetadata) {
+            try {
+                // Find method on the class where it was declared (may be interface/superclass)
+                Class<?> declaringClass = Thread.currentThread().getContextClassLoader()
+                        .loadClass(actionInfo.getClassName());
+                Method method = findMethod(declaringClass, actionInfo.getMethodName(), actionInfo.getParameters());
+                if (method == null) {
+                    logger.warnf("Could not find @Action method: %s.%s", actionInfo.getClassName(),
+                            actionInfo.getMethodName());
+                    continue;
+                }
+
+                method.setAccessible(true);
+
+                // Build cost methods map for this specific action
+                Map<String, CostMethodInfo> actionCostMethods = new HashMap<>();
+                if (actionInfo.getCostMethodName() != null) {
+                    CostMethodInfo costMethod = costMethodMap.get(actionInfo.getCostMethodName());
+                    if (costMethod != null) {
+                        actionCostMethods.put(actionInfo.getCostMethodName(), costMethod);
+                    } else {
+                        logger.warnf("@Action %s references unknown @Cost method: %s",
+                                actionInfo.getMethodName(), actionInfo.getCostMethodName());
+                    }
+                }
+
+                Action action = actionMethodManager.createAction(
+                        method, agentInstance, toolsOnInstance, actionCostMethods);
+                actions.add(action);
+                logger.debugf("Registered @Action: %s.%s -> %s", agentClass.getSimpleName(),
+                        actionInfo.getMethodName(), actionInfo.getReturnType());
+            } catch (Exception e) {
+                logger.warnf("Failed to create action from %s.%s: %s",
+                        agentClass.getSimpleName(), actionInfo.getMethodName(), e.getMessage());
+            }
+        }
+
         return actions;
     }
 
-    private Set<Condition> createConditions(Class<?> agentClass, Object agentInstance) {
-        Set<Condition> conditions = new LinkedHashSet<>();
-        for (Method method : agentClass.getDeclaredMethods()) {
-            com.embabel.agent.api.annotation.Condition ann = method
-                    .getAnnotation(com.embabel.agent.api.annotation.Condition.class);
-            if (ann == null) {
-                continue;
-            }
-            String condName = ann.name().isEmpty()
-                    ? agentClass.getSimpleName() + "." + method.getName()
-                    : ann.name();
-            double cost = ann.cost();
-            method.setAccessible(true);
+    /**
+     * Create conditions from build-time metadata instead of scanning at runtime.
+     */
+    private Set<Condition> createConditionsFromMetadata(
+            Class<?> agentClass,
+            Object agentInstance,
+            List<ConditionMethodBuildInfo> conditionMethodsMetadata) {
 
-            conditions.add(new ComputedBooleanCondition(condName, cost,
-                    (context, condition) -> invokeConditionMethod(method, agentInstance, context)));
-            logger.debugf("Registered @Condition: %s.%s", agentClass.getSimpleName(), method.getName());
+        Set<Condition> conditions = new LinkedHashSet<>();
+
+        for (ConditionMethodBuildInfo condInfo : conditionMethodsMetadata) {
+            try {
+                // Find method on the class where it was declared (may be interface/superclass)
+                Class<?> declaringClass = Thread.currentThread().getContextClassLoader()
+                        .loadClass(condInfo.getClassName());
+                Method method = findMethod(declaringClass, condInfo.getMethodName(), condInfo.getParameters());
+                if (method == null) {
+                    logger.warnf("Could not find @Condition method: %s.%s", condInfo.getClassName(),
+                            condInfo.getMethodName());
+                    continue;
+                }
+
+                method.setAccessible(true);
+
+                conditions.add(new ComputedBooleanCondition(condInfo.getConditionName(), condInfo.getCost(),
+                        (context, condition) -> invokeConditionMethod(method, agentInstance, context)));
+                logger.debugf("Registered @Condition: %s.%s [%s]", agentClass.getSimpleName(),
+                        condInfo.getMethodName(), condInfo.getConditionName());
+            } catch (Exception e) {
+                logger.warnf("Failed to create condition from %s.%s: %s",
+                        agentClass.getSimpleName(), condInfo.getMethodName(), e.getMessage());
+            }
         }
+
         return conditions;
     }
 
     /**
+     * Find a method by name and parameter types from build-time metadata.
+     * Searches the full class hierarchy since metadata may reference inherited methods.
+     */
+    private Method findMethod(Class<?> clazz, String methodName, List<ParameterBuildInfo> parameters) {
+        Class<?>[] paramTypes = new Class<?>[parameters.size()];
+        for (int i = 0; i < parameters.size(); i++) {
+            try {
+                paramTypes[i] = Thread.currentThread().getContextClassLoader().loadClass(parameters.get(i).getType());
+            } catch (ClassNotFoundException e) {
+                logger.warnf("Could not load parameter type: %s", parameters.get(i).getType());
+                return null;
+            }
+        }
+
+        try {
+            // Search in class hierarchy - handles inherited methods
+            return clazz.getMethod(methodName, paramTypes);
+        } catch (NoSuchMethodException e) {
+            // Try getDeclaredMethod as fallback for private methods
+            try {
+                return clazz.getDeclaredMethod(methodName, paramTypes);
+            } catch (NoSuchMethodException ex) {
+                return null;
+            }
+        }
+    }
+
+    /**
      * Creates goals from actions with @AchievesGoal annotation.
-     * Matches Spring Boot's AgentMetadataReader.createGoalFromActionMethod() behavior.
-     * <p>
-     * For each action with @AchievesGoal, creates a goal with:
-     * <ul>
-     * <li>Name: generated using nameGenerator (e.g., "com.example.Agent.methodName")</li>
-     * <li>Description: from @AchievesGoal annotation</li>
-     * <li>Input: the action's output binding</li>
-     * <li>Preconditions: hasRun(action) + all action preconditions (ensures action has executed and its requirements were
-     * met)</li>
-     * </ul>
+     * Uses build-time metadata to identify which actions have goals.
      *
      * @param actions list of actions created for this agent
-     * @param goalActionInfos goal action metadata with @AchievesGoal (discovered at build time via Jandex)
+     * @param actionMethodsMetadata build-time metadata containing @AchievesGoal info
      * @param agentInstance the agent instance for name generation
      * @return set of goals for @AchievesGoal-annotated actions
      */
-    private Set<Goal> createGoalsFromActions(List<Action> actions, Set<GoalActionInfo> goalActionInfos,
+    private Set<Goal> createGoalsFromMetadata(
+            List<Action> actions,
+            List<ActionMethodBuildInfo> actionMethodsMetadata,
             Object agentInstance) {
+
         Set<Goal> goals = new LinkedHashSet<>();
         ClassLoader runtimeClassLoader = Thread.currentThread().getContextClassLoader();
 
-        // Build a map of action names to GoalActionInfo for quick lookup
-        Map<String, GoalActionInfo> infoByActionName = new java.util.HashMap<>();
-        for (GoalActionInfo info : goalActionInfos) {
-            infoByActionName.put(info.getFullyQualifiedActionName(), info);
+        // Build a map of action names to metadata for quick lookup
+        Map<String, ActionMethodBuildInfo> metadataByActionName = new HashMap<>();
+        for (ActionMethodBuildInfo actionInfo : actionMethodsMetadata) {
+            if (actionInfo.isAchievesGoal()) {
+                metadataByActionName.put(actionInfo.getFullyQualifiedName(), actionInfo);
+            }
         }
 
-        logger.debugf("Available @AchievesGoal actions from build time: %s", infoByActionName.keySet());
+        logger.debugf("Available @AchievesGoal actions from build time: %s", metadataByActionName.keySet());
 
         for (Action action : actions) {
             String actionName = action.getName();
             logger.debugf("Checking runtime action: %s", actionName);
 
             // Check if this action has @AchievesGoal annotation
-            GoalActionInfo goalInfo = infoByActionName.get(actionName);
-            if (goalInfo == null) {
+            ActionMethodBuildInfo actionInfo = metadataByActionName.get(actionName);
+            if (actionInfo == null) {
                 logger.debugf("No @AchievesGoal annotation found for action: %s", actionName);
                 continue;
             }
 
-            logger.debugf("Found @AchievesGoal for action %s: %s", actionName, goalInfo.getDescription());
+            logger.debugf("Found @AchievesGoal for action %s: %s", actionName, actionInfo.getGoalDescription());
 
             // Get the action's output type to create the goal
             if (action.getOutputs().isEmpty()) {
@@ -188,14 +301,11 @@ class QuarkusAgentDeployer {
                 Class<?> outputType = runtimeClassLoader.loadClass(outputTypeName);
 
                 // Generate goal name using nameGenerator (matches Spring Boot behavior)
-                // Extract method name from fully qualified action name: com.example.Agent.methodName -> methodName
                 String methodName = actionName.substring(actionName.lastIndexOf('.') + 1);
                 String goalName = nameGenerator.generateName(agentInstance, methodName);
 
                 // Create goal with hasRun precondition + action's preconditions
-                // Matches Spring Boot's: pre = setOf(Rerun.hasRunCondition(action)) + goalPreconditions
-                String hasRunPrecondition = com.embabel.agent.core.support.Rerun.INSTANCE
-                        .hasRunCondition(action);
+                String hasRunPrecondition = Rerun.INSTANCE.hasRunCondition(action);
 
                 // Exclude action's output from preconditions to avoid circular dependency
                 String outputBindingToExclude = "it:" + outputTypeName;
@@ -209,11 +319,10 @@ class QuarkusAgentDeployer {
                 allPreconditions.addAll(actionPreconditions);
 
                 // Use @AchievesGoal description and generated name
-                // createInstance signature: createInstance(description, type, name, tags, examples)
                 Goal goal = Goal.createInstance(
-                        goalInfo.getDescription(), // description from @AchievesGoal
-                        outputType, // satisfiedBy type
-                        goalName) // name from nameGenerator
+                        actionInfo.getGoalDescription(),
+                        outputType,
+                        goalName)
                         .withPreconditions(allPreconditions.toArray(new String[0]));
 
                 goals.add(goal);
