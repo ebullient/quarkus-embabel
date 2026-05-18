@@ -1,0 +1,42 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/chat/completions",
+    "bodyPatterns": [
+      {
+        "matches": ".*\"role\"\\s*:\\s*\"tool\".*"
+      },
+      {
+        "contains": "call_abc123"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-tool-response-456",
+      "object": "chat.completion",
+      "created": 1234567891,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "Answer: 8.0\nExplanation: I used the add tool to calculate 5 + 3, which equals 8."
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 60,
+        "completion_tokens": 25,
+        "total_tokens": 85
+      }
+    }
+  }
+}

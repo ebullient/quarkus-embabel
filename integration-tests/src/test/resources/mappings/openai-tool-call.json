@@ -1,0 +1,52 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/chat/completions",
+    "bodyPatterns": [
+      {
+        "contains": "\"name\" : \"add\""
+      },
+      {
+        "contains": "plus"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-tool-test-123",
+      "object": "chat.completion",
+      "created": 1234567890,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_abc123",
+                "type": "function",
+                "function": {
+                  "name": "add",
+                  "arguments": "{\"a\": 5.0, \"b\": 3.0}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 50,
+        "completion_tokens": 20,
+        "total_tokens": 70
+      }
+    }
+  }
+}
