@@ -33,7 +33,7 @@
         <quarkus-langchain4j.version>1.10.0.CR1</quarkus-langchain4j.version>
         <assertj.version>3.27.7</assertj.version>
         <kotlin.version>2.3.21</kotlin.version>
-        <reactor-core.version>3.7.18</reactor-core.version>
+        <reactor-core.version>3.8.5</reactor-core.version>
         <spring-retry.version>2.0.12</spring-retry.version>
         <spring-ai-retry.version>1.0.0-M6</spring-ai-retry.version>
         <jsonschema-generator.version>4.38.0</jsonschema-generator.version>
