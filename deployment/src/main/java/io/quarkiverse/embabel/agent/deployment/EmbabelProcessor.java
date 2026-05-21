@@ -447,5 +447,8 @@ public class EmbabelProcessor {
                 io.quarkiverse.embabel.agent.runtime.producer.LlmOperationsProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.AgentPlatformProducer.class));
+        // String reference avoids compile-time dependency on Kotlin stdlib in deployment module
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                "io.quarkiverse.embabel.agent.runtime.producer.AiBeansProducer"));
     }
 }

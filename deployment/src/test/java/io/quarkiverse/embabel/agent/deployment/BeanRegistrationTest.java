@@ -16,9 +16,10 @@ import com.embabel.agent.api.annotation.Condition;
 import com.embabel.agent.api.annotation.Cost;
 import com.embabel.agent.api.annotation.LlmTool;
 import com.embabel.agent.api.common.Ai;
+import com.embabel.agent.api.common.AiBuilder;
+import com.embabel.agent.api.common.ExecutingOperationContext;
 import com.embabel.agent.api.common.OperationContext;
 import com.embabel.agent.core.AgentPlatform;
-import com.embabel.agent.core.AgentScope;
 import com.embabel.agent.core.internal.LlmOperations;
 import com.embabel.agent.domain.io.UserInput;
 import com.embabel.agent.spi.ToolGroupResolver;
@@ -91,6 +92,15 @@ class BeanRegistrationTest {
 
     @Inject
     InheritingAgent inheritingAgent;
+
+    @Inject
+    Ai ai;
+
+    @Inject
+    ExecutingOperationContext executingOperationContext;
+
+    @Inject
+    AiBuilder aiBuilder;
 
     /**
      * Test that extension beans registered by the BeanRegistrationProcessor
@@ -182,6 +192,35 @@ class BeanRegistrationTest {
         assertThat(agentPlatform.getName())
                 .as("AgentPlatform should have configured name")
                 .isEqualTo("quarkus-agent-platform");
+    }
+
+    @Test
+    void testAiBeanIsInjectable() {
+        assertThat(ai)
+                .as("Ai should be injectable as a CDI bean")
+                .isNotNull();
+    }
+
+    @Test
+    void testExecutingOperationContextBeanIsInjectable() {
+        assertThat(executingOperationContext)
+                .as("ExecutingOperationContext should be injectable as a CDI bean")
+                .isNotNull();
+
+        assertThat(executingOperationContext.ai())
+                .as("ExecutingOperationContext should provide Ai instance")
+                .isNotNull();
+    }
+
+    @Test
+    void testAiBuilderBeanIsInjectable() {
+        assertThat(aiBuilder)
+                .as("AiBuilder should be injectable as a CDI bean")
+                .isNotNull();
+
+        assertThat(aiBuilder.ai())
+                .as("AiBuilder should be able to create Ai instances")
+                .isNotNull();
     }
 
     /**
