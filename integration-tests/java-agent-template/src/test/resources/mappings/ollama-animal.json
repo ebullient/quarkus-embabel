@@ -1,0 +1,25 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/chat",
+    "bodyPatterns": [
+      { "contains": "magical forest" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "model": "gemma4",
+      "created_at": "2025-01-01T00:00:00Z",
+      "message": {
+        "role": "assistant",
+        "content": "{\"name\": \"Fluffox\", \"species\": \"Magicox\"}"
+      },
+      "done": true,
+      "prompt_eval_count": 10,
+      "eval_count": 15
+    }
+  }
+}
