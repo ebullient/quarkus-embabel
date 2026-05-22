@@ -9,8 +9,12 @@ import io.quarkus.arc.ClientProxy;
  * to ensure consistent goal naming between Spring Boot and Quarkus deployments.
  * <p>
  * Generates names in the format: {@code "fully.qualified.ClassName.methodName"}
+ * <p>
+ * Implements the upstream {@link com.embabel.agent.api.annotation.support.MethodDefinedOperationNameGenerator}
+ * interface to be compatible with {@link com.embabel.agent.api.annotation.support.DefaultActionMethodManager}.
  */
-class MethodDefinedOperationNameGenerator {
+class MethodDefinedOperationNameGenerator
+        implements com.embabel.agent.api.annotation.support.MethodDefinedOperationNameGenerator {
 
     /**
      * Generate a qualified name to avoid name clashes.
@@ -28,7 +32,8 @@ class MethodDefinedOperationNameGenerator {
      * @param name The name of the method or property for which we should generate a name
      * @return Fully qualified name in format "com.example.ClassName.methodName"
      */
-    String generateName(Object instance, String name) {
+    @Override
+    public String generateName(Object instance, String name) {
         // Unwrap Arc CDI client proxies to get the actual bean class
         Class<?> targetClass;
         if (instance instanceof ClientProxy) {

@@ -10,6 +10,8 @@ import org.jboss.logging.Logger;
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.AgentScope;
 
+import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
+import io.quarkiverse.embabel.agent.runtime.qos.QuarkusActionQosPropertyProvider;
 import io.quarkus.runtime.annotations.Recorder;
 
 /**
@@ -58,7 +60,13 @@ public class AgentDeploymentRecorder {
 
         CDI<Object> cdi = CDI.current();
         AgentPlatform agentPlatform = cdi.select(AgentPlatform.class).get();
-        QuarkusAgentDeployer deployer = new QuarkusAgentDeployer();
+
+        // Look up Action QoS beans from CDI
+        ActionQosConfig defaultActionQosConfig = cdi.select(ActionQosConfig.class).get();
+        QuarkusActionQosPropertyProvider propertyProvider = cdi.select(QuarkusActionQosPropertyProvider.class).get();
+
+        // Create deployer with QoS configuration
+        QuarkusAgentDeployer deployer = new QuarkusAgentDeployer(defaultActionQosConfig, propertyProvider);
 
         int deployedCount = 0;
         for (String className : agentClassNames) {

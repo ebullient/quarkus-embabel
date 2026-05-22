@@ -11,8 +11,11 @@ import java.util.Set;
 
 import org.jboss.logging.Logger;
 
+import com.embabel.agent.api.annotation.support.ActionMethodManager;
+import com.embabel.agent.api.annotation.support.ActionQosPropertyProvider;
 import com.embabel.agent.api.annotation.support.CostMethodInfo;
 import com.embabel.agent.api.annotation.support.DefaultActionMethodManager;
+import com.embabel.agent.api.annotation.support.DefaultActionQosProvider;
 import com.embabel.agent.api.tool.Tool;
 import com.embabel.agent.core.Action;
 import com.embabel.agent.core.Agent;
@@ -21,6 +24,11 @@ import com.embabel.agent.core.ComputedBooleanCondition;
 import com.embabel.agent.core.Condition;
 import com.embabel.agent.core.Goal;
 import com.embabel.agent.core.support.Rerun;
+import com.embabel.agent.spi.config.spring.AgentPlatformProperties;
+
+import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
+import io.quarkiverse.embabel.agent.runtime.qos.QuarkusActionMethodManager;
+import io.quarkiverse.embabel.agent.runtime.qos.QuarkusActionQosPropertyProvider;
 
 /**
  * Quarkus-native replacement for {@code AgentMetadataReader}.
@@ -37,8 +45,73 @@ import com.embabel.agent.core.support.Rerun;
 class QuarkusAgentDeployer {
 
     private static final Logger logger = Logger.getLogger(QuarkusAgentDeployer.class);
-    private final DefaultActionMethodManager actionMethodManager = new DefaultActionMethodManager();
+    private final ActionMethodManager actionMethodManager;
     private final MethodDefinedOperationNameGenerator nameGenerator = new MethodDefinedOperationNameGenerator();
+
+    /**
+     * Constructor accepting Action QoS configuration.
+     * <p>
+     * Creates a {@link DefaultActionMethodManager} with a {@link DefaultActionQosProvider}
+     * that uses the Quarkus-backed property provider instead of Spring Binder.
+     *
+     * @param defaultActionQosConfig default Action QoS configuration
+     * @param propertyProvider Quarkus-backed property provider for named configurations
+     */
+    QuarkusAgentDeployer(ActionQosConfig defaultActionQosConfig, QuarkusActionQosPropertyProvider propertyProvider) {
+        // Convert extension-owned config to upstream format
+        AgentPlatformProperties.ActionQosProperties actionQosProperties = toActionQosProperties(defaultActionQosConfig);
+
+        // Create upstream ActionQosPropertyProvider adapter
+        ActionQosPropertyProvider upstreamPropertyProvider = new ActionQosPropertyProvider() {
+            @Override
+            public AgentPlatformProperties.ActionQosProperties.ActionProperties getBound(String expr) {
+                return propertyProvider.getBound(expr);
+            }
+        };
+
+        // Create DefaultActionQosProvider with Quarkus-backed components
+        DefaultActionQosProvider qosProvider = new DefaultActionQosProvider(
+                actionQosProperties,
+                upstreamPropertyProvider);
+
+        // Create QuarkusActionMethodManager with the QoS provider
+        // Uses wrapper class to work around Kotlin-Java interop issues with default parameters
+        this.actionMethodManager = new QuarkusActionMethodManager(nameGenerator, qosProvider);
+    }
+
+    /**
+     * Convert extension-owned ActionQosConfig to upstream ActionQosProperties format.
+     * <p>
+     * This preserves the default configuration structure expected by {@link DefaultActionQosProvider}.
+     *
+     * @param config the extension-owned default config
+     * @return the upstream ActionQosProperties with default field populated
+     */
+    private AgentPlatformProperties.ActionQosProperties toActionQosProperties(ActionQosConfig config) {
+        AgentPlatformProperties.ActionQosProperties props = new AgentPlatformProperties.ActionQosProperties();
+
+        // Convert to ActionProperties format
+        AgentPlatformProperties.ActionQosProperties.ActionProperties defaultProps = new AgentPlatformProperties.ActionQosProperties.ActionProperties();
+
+        if (config.getMaxAttempts() != null) {
+            defaultProps.setMaxAttempts(config.getMaxAttempts());
+        }
+        if (config.getBackoffMillis() != null) {
+            defaultProps.setBackoffMillis(config.getBackoffMillis());
+        }
+        if (config.getBackoffMultiplier() != null) {
+            defaultProps.setBackoffMultiplier(config.getBackoffMultiplier());
+        }
+        if (config.getBackoffMaxInterval() != null) {
+            defaultProps.setBackoffMaxInterval(config.getBackoffMaxInterval());
+        }
+        if (config.getIdempotent() != null) {
+            defaultProps.setIdempotent(config.getIdempotent());
+        }
+
+        props.setDefault(defaultProps);
+        return props;
+    }
 
     /**
      * Builds an {@link AgentScope} from a CDI bean instance using build-time metadata.
