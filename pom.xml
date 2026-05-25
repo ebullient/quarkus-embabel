@@ -35,7 +35,7 @@
         <kotlin.version>2.3.21</kotlin.version>
         <reactor-core.version>3.7.18</reactor-core.version>
         <spring-retry.version>2.0.12</spring-retry.version>
-        <spring-ai-retry.version>1.0.0-M6</spring-ai-retry.version>
+        <spring-ai-retry.version>2.0.0-M7</spring-ai-retry.version>
         <jsonschema-generator.version>4.38.0</jsonschema-generator.version>
     </properties>
 
