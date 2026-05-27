@@ -51,6 +51,8 @@ public class EmbabelProcessor {
 
     private static final String FEATURE = "embabel-agent";
     private static final DotName AGENT_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Agent");
+    private static final DotName EMBABEL_COMPONENT_ANNOTATION = DotName
+            .createSimple("com.embabel.agent.api.annotation.EmbabelComponent");
     private static final DotName ACTION_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Action");
     private static final DotName ACHIEVES_GOAL_ANNOTATION = DotName
             .createSimple("com.embabel.agent.api.annotation.AchievesGoal");
@@ -127,6 +129,38 @@ public class EmbabelProcessor {
             }
         }
 
+        // Find all classes annotated with @EmbabelComponent
+        // These provide actions/conditions that agents can use, but are not agents themselves
+        for (AnnotationInstance componentAnnotation : index.getAnnotations(EMBABEL_COMPONENT_ANNOTATION)) {
+            ClassInfo componentClass = componentAnnotation.target().asClass();
+            String className = componentClass.name().toString();
+
+            // Register the component class as a CDI bean
+            // Note: @EmbabelComponent is a Spring stereotype; we register it the same as @Agent
+            additionalBeans.produce(AdditionalBeanBuildItem.builder()
+                    .addBeanClass(className)
+                    .setUnremovable()
+                    .build());
+
+            // Collect class name for runtime deployment
+            agentClassNames.add(className);
+
+            // Scan for actions, conditions, and cost methods
+            List<ActionMethodBuildInfo> actionMethods = scanner.scanActionMethods(componentClass);
+            List<ConditionMethodBuildInfo> conditionMethods = scanner.scanConditionMethods(componentClass);
+            List<CostMethodBuildInfo> costMethods = scanner.scanCostMethods(componentClass);
+
+            if (!actionMethods.isEmpty()) {
+                actionMethodsByAgent.put(className, actionMethods);
+            }
+            if (!conditionMethods.isEmpty()) {
+                conditionMethodsByAgent.put(className, conditionMethods);
+            }
+            if (!costMethods.isEmpty()) {
+                costMethodsByAgent.put(className, costMethods);
+            }
+        }
+
         // Produce comprehensive metadata build item for runtime use
         agentMetadataProducer.produce(new AgentMetadataBuildItem(
                 actionMethodsByAgent,
@@ -169,6 +203,27 @@ public class EmbabelProcessor {
                     .setUnremovable()
                     .build());
         }
+    }
+
+    /**
+     * Registers the ChatBeansProducer to enable Chat API support.
+     * <p>
+     * This build step registers the ChatBeansProducer class as a CDI bean,
+     * which provides producer methods for:
+     * <ul>
+     * <li>{@link com.embabel.chat.ConversationFactory} - Default in-memory implementation</li>
+     * <li>{@link com.embabel.chat.Chatbot} - Main chat interface backed by AgentProcessChatbot</li>
+     * </ul>
+     *
+     * @param additionalBeans producer for additional bean build items
+     */
+    @BuildStep
+    void registerChatBeans(BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+        // Register ChatBeansProducer so its @Produces methods are discovered
+        additionalBeans.produce(AdditionalBeanBuildItem.builder()
+                .addBeanClass("io.quarkiverse.embabel.agent.runtime.producer.ChatBeansProducer")
+                .setUnremovable()
+                .build());
     }
 
     /**
@@ -452,5 +507,7 @@ public class EmbabelProcessor {
         // String reference avoids compile-time dependency on Kotlin stdlib in deployment module
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 "io.quarkiverse.embabel.agent.runtime.producer.AiBeansProducer"));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.LlmOperationsProducer.class));
     }
 }

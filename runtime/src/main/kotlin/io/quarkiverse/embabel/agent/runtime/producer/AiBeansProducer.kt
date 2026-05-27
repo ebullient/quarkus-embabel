@@ -26,7 +26,7 @@ import jakarta.enterprise.inject.Produces
  * @see com.embabel.agent.spi.config.spring.InfrastructureInjectionConfiguration
  */
 @ApplicationScoped
-class AiBeansProducer {
+open class AiBeansProducer {
 
     /**
      * Produces an [ExecutingOperationContext] for injection into components.

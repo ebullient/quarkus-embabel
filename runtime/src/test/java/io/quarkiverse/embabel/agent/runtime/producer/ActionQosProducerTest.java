@@ -2,9 +2,6 @@ package io.quarkiverse.embabel.agent.runtime.producer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import jakarta.inject.Inject;
 
 import org.junit.jupiter.api.Test;
@@ -12,21 +9,35 @@ import org.junit.jupiter.api.Test;
 import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
 import io.quarkiverse.embabel.agent.runtime.config.NamedActionQosConfig;
 import io.quarkiverse.embabel.agent.runtime.qos.QuarkusActionQosPropertyProvider;
-import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.component.QuarkusComponentTest;
+import io.quarkus.test.component.TestConfigProperty;
 
 /**
- * Integration tests for {@link ActionQosProducer}.
+ * Component tests for {@link ActionQosProducer} using CDI.
  * <p>
  * Tests verify that CDI beans are created and properly wired with sample
- * application.properties containing default and named QoS entries.
+ * configuration properties containing default and named QoS entries.
  * <p>
  * These tests focus on CDI bean production and wiring, not on re-testing
  * the property parsing logic already covered in {@link io.quarkiverse.embabel.agent.runtime.config.ActionQosConfigBindingTest}.
+ * <p>
+ * Uses {@link QuarkusComponentTest} for lightweight CDI testing with real
+ * bean discovery and injection.
  */
-@QuarkusTest
-@TestProfile(ActionQosProducerTest.ConfigProfile.class)
+@QuarkusComponentTest
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.default.max-attempts", value = "3")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.default.backoff-millis", value = "1000")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.default.backoff-multiplier", value = "2.0")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.default.backoff-max-interval", value = "30000")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.default.idempotent", value = "false")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.fast-retry.max-attempts", value = "5")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.fast-retry.backoff-millis", value = "100")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.agents.agent.method.max-attempts", value = "10")
+@TestConfigProperty(key = "embabel.agent.platform.action-qos.agents.agent.method.idempotent", value = "true")
 class ActionQosProducerTest {
+
+    @Inject
+    ActionQosProducer actionQosProducer;
 
     @Inject
     ActionQosConfig defaultActionQosConfig;
@@ -36,33 +47,6 @@ class ActionQosProducerTest {
 
     @Inject
     QuarkusActionQosPropertyProvider actionQosPropertyProvider;
-
-    /**
-     * Test profile that provides Action QoS configuration properties.
-     */
-    public static class ConfigProfile implements io.quarkus.test.junit.QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            Map<String, String> config = new HashMap<>();
-
-            // Default configuration
-            config.put("embabel.agent.platform.action-qos.default.max-attempts", "3");
-            config.put("embabel.agent.platform.action-qos.default.backoff-millis", "1000");
-            config.put("embabel.agent.platform.action-qos.default.backoff-multiplier", "2.0");
-            config.put("embabel.agent.platform.action-qos.default.backoff-max-interval", "30000");
-            config.put("embabel.agent.platform.action-qos.default.idempotent", "false");
-
-            // Simple named configuration
-            config.put("embabel.agent.platform.action-qos.fast-retry.max-attempts", "5");
-            config.put("embabel.agent.platform.action-qos.fast-retry.backoff-millis", "100");
-
-            // Hierarchical named configuration
-            config.put("embabel.agent.platform.action-qos.agents.agent.method.max-attempts", "10");
-            config.put("embabel.agent.platform.action-qos.agents.agent.method.idempotent", "true");
-
-            return config;
-        }
-    }
 
     @Test
     void beansAreProduced() {

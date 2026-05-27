@@ -121,7 +121,7 @@ class QuarkusAgentDeployer {
      * @param actionMethods build-time metadata for @Action methods (includes inherited from interfaces/superclasses)
      * @param conditionMethods build-time metadata for @Condition methods
      * @param costMethods build-time metadata for @Cost methods
-     * @return a fully-wired {@link AgentScope}, or {@code null} if the class has no {@code @Agent}
+     * @return a fully-wired {@link AgentScope}, or {@code null} if the class has no {@code @Agent} or {@code @EmbabelComponent}
      */
     AgentScope createAgentScope(
             Class<?> agentClass,
@@ -132,8 +132,11 @@ class QuarkusAgentDeployer {
 
         com.embabel.agent.api.annotation.Agent agentAnnotation = agentClass
                 .getAnnotation(com.embabel.agent.api.annotation.Agent.class);
-        if (agentAnnotation == null) {
-            logger.warnf("Class %s has no @Agent annotation — skipping", agentClass.getName());
+        com.embabel.agent.api.annotation.EmbabelComponent componentAnnotation = agentClass
+                .getAnnotation(com.embabel.agent.api.annotation.EmbabelComponent.class);
+
+        if (agentAnnotation == null && componentAnnotation == null) {
+            logger.warnf("Class %s has no @Agent or @EmbabelComponent annotation — skipping", agentClass.getName());
             return null;
         }
 
@@ -154,18 +157,30 @@ class QuarkusAgentDeployer {
         // Build goals from actions with @AchievesGoal
         Set<Goal> goals = createGoalsFromMetadata(actions, actionMethods, agentInstance);
 
-        String name = agentAnnotation.name().isEmpty()
-                ? agentClass.getSimpleName()
-                : agentAnnotation.name();
-        String provider = agentAnnotation.provider().isEmpty()
-                ? agentClass.getPackage().getName()
-                : agentAnnotation.provider();
+        // Get agent metadata from @Agent or generate defaults for @EmbabelComponent
+        String name;
+        String provider;
+        String version;
+        String description;
+
+        if (agentAnnotation != null) {
+            name = agentAnnotation.name().isEmpty() ? agentClass.getSimpleName() : agentAnnotation.name();
+            provider = agentAnnotation.provider().isEmpty() ? agentClass.getPackage().getName()
+                    : agentAnnotation.provider();
+            version = agentAnnotation.version();
+            description = agentAnnotation.description();
+        } else {
+            // @EmbabelComponent - use class name and package
+            name = agentClass.getSimpleName();
+            provider = agentClass.getPackage().getName();
+            version = "1.0.0";
+            description = "Component providing reusable actions";
+        }
 
         logger.debugf("Building Agent '%s' with %d goal(s), %d action(s), %d condition(s)",
                 name, goals.size(), actions.size(), conditions.size());
 
-        return new Agent(name, provider, agentAnnotation.version(), agentAnnotation.description(),
-                goals, actions, conditions);
+        return new Agent(name, provider, version, description, goals, actions, conditions);
     }
 
     /**
