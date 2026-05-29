@@ -2,26 +2,147 @@
 
 [![Version](https://img.shields.io/maven-central/v/io.quarkiverse/quarkus-embabel-extension?logo=apache-maven&style=flat-square)](https://central.sonatype.com/artifact/io.quarkiverse/quarkus-embabel-extension-parent)
 
-## Welcome to Quarkiverse!
+A Quarkus extension that enables [Embabel](https://embabel.com) agents to run on Quarkus with CDI-based lifecycle management and LangChain4j integration.
 
-Congratulations and thank you for creating a new Quarkus extension project in Quarkiverse!
+## What is Embabel?
 
-Feel free to replace this content with the proper description of your new project and necessary instructions how to use and contribute to it.
+Embabel is an agent framework that provides multi-step agent execution with planning strategies (GOAP, Utility AI, Supervisor) and LLM tool integration. Originally built for Spring Boot, this extension brings Embabel to the Quarkus ecosystem.
 
-You can find the basic info, Quarkiverse policies and conventions in [the Quarkiverse wiki](https://github.com/quarkiverse/quarkiverse/wiki).
+## Features
 
-In case you are creating a Quarkus extension project for the first time, please follow [Building My First Extension](https://quarkus.io/guides/building-my-first-extension) guide.
+- 🔄 **CDI-based agent lifecycle** - Native Quarkus dependency injection (Spring DI also supported)
+- 🤖 **LangChain4j integration** - Support for OpenAI, Anthropic, Ollama, and other LLM providers
+- 📋 **Multiple planning strategies** - GOAP (Goal-Oriented Action Planning), Utility AI, Supervisor
+- 🔧 **LLM tool discovery** - Automatic registration of tools for LLM to use
+- ⚡ **Quarkus performance** - Build-time optimization and fast startup
+- ☕ **Java & Kotlin support** - Embabel core is Kotlin-based, Java applications fully supported
 
-Other useful articles related to Quarkus extension development can be found under the [Writing Extensions](https://quarkus.io/guides/#writing-extensions) guide category on the [Quarkus.io](https://quarkus.io) website.
+## Installation
 
-Thanks again, good luck and have fun!
+Add the extension to your Quarkus project:
+
+**Maven:**
+```xml
+<dependency>
+    <groupId>io.quarkiverse</groupId>
+    <artifactId>quarkus-embabel-agent</artifactId>
+    <version>${quarkus-embabel.version}</version>
+</dependency>
+```
+
+**Gradle:**
+```gradle
+implementation 'io.quarkiverse:quarkus-embabel-agent:${quarkusEmbabelVersion}'
+```
+
+You'll also need a LangChain4j model provider. For example, to use OpenAI:
+
+```xml
+<dependency>
+    <groupId>io.quarkiverse.langchain4j</groupId>
+    <artifactId>quarkus-langchain4j-openai</artifactId>
+</dependency>
+```
+
+## Quick Start
+
+### 1. Define an Agent
+
+```java
+import com.embabel.agent.api.annotation.Agent;
+import com.embabel.agent.api.annotation.Action;
+import com.embabel.agent.api.annotation.AchievesGoal;
+import jakarta.inject.Inject;
+
+@Agent(description = "A simple greeting agent")
+public class GreetingAgent {
+    
+    @Inject
+    SomeService service;
+    
+    @Action
+    public String greet(String name) {
+        return "Hello, " + name + "!";
+    }
+    
+    @AchievesGoal
+    public String createGreeting(String input) {
+        return greet(input);
+    }
+}
+```
+
+### 2. Configure Your LLM Provider
+
+In `application.properties`:
+
+```properties
+quarkus.langchain4j.openai.api-key=${OPENAI_API_KEY}
+quarkus.langchain4j.openai.chat-model.model-name=gpt-4
+```
+
+### 3. Deploy and Run
+
+Agents are automatically discovered and deployed at startup. Use CDI to inject and run your agents:
+
+```java
+@Inject
+AgentPlatform platform;
+
+public void runAgent() {
+    platform.deploy("greeting-agent", GreetingAgent.class);
+    // Agent is now running and ready to process requests
+}
+```
+
+## Key Concepts
+
+### Annotations
+- `@Agent` - Define a multi-step agent
+- `@Action` - Define an agent step/capability
+- `@AchievesGoal` - Mark a terminal action that completes the agent's goal
+- `@LlmTool` / `@Tool` - Tools that the LLM can invoke
+- `@EmbabelComponent` - Components for Utility AI
+
+### Planning Strategies
+- **GOAP** - Goal-Oriented Action Planning for complex goal hierarchies
+- **Utility AI** - Score-based action selection
+- **Supervisor** - LLM-guided planning and execution
+
+### API vs SPI
+**Important**: Application code should use only `com.embabel.agent.api.*` (API), never SPI directly.
+
+## Examples
+
+Check the `integration-tests/` directory for complete examples:
+- **`java-agent-template/`** - Basic agent patterns and tests
+- **`rest-api/`** - REST endpoint integration examples
+
+## LLM Provider Support
+
+Via LangChain4j integration:
+- OpenAI (GPT-3.5, GPT-4, GPT-4o)
+- Anthropic (Claude)
+- Ollama (local models)
+- Others - See [LangChain4j documentation](https://docs.langchain4j.dev/)
 
 ## Documentation
 
-The documentation for this extension should be maintained as part of this repository and it is stored in the `docs/` directory.
+Full documentation is available at <https://docs.quarkiverse.io/>
 
-The layout should follow the [Antora's Standard File and Directory Set](https://docs.antora.org/antora/2.3/standard-directories/).
+## Contributing
 
-Once the docs are ready to be published, please open a PR including this repository in the [Quarkiverse Docs Antora playbook](https://github.com/quarkiverse/quarkiverse-docs/blob/main/antora-playbook.yml#L7). See an example [here](https://github.com/quarkiverse/quarkiverse-docs/pull/1)
+Contributions are welcome! This extension is part of the Quarkiverse ecosystem.
 
-Your documentation will then be published to the <https://docs.quarkiverse.io/> website.
+- [Quarkiverse Contributing Guide](https://github.com/quarkiverse/quarkiverse/wiki)
+- [Building Quarkus Extensions](https://quarkus.io/guides/building-my-first-extension)
+
+## Requirements
+
+- Java 21+
+- Quarkus 3.x
+- Maven or Gradle
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

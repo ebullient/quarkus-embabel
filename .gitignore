@@ -65,3 +65,4 @@ release.properties
 
 .opencode
 .claude/settings.local.json
+*.local.md
