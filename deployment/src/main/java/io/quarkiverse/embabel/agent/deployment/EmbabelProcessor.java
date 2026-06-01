@@ -495,9 +495,13 @@ public class EmbabelProcessor {
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.CoreBeansProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.EmbabelConfigProducer.class));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.EventListenerProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.ToolProducer.class));
+        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
+                io.quarkiverse.embabel.agent.runtime.producer.ToolLoopPolicyProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.LlmOperationsProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(

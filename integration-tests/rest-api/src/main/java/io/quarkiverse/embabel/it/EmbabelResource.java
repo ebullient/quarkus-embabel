@@ -6,6 +6,11 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
+import com.embabel.agent.core.AgentPlatform;
+import com.embabel.common.ai.model.ConfigurableModelProviderProperties;
 import com.embabel.common.ai.model.DefaultModelSelectionCriteria;
 import com.embabel.common.ai.model.EmbeddingService;
 import com.embabel.common.ai.model.ModelProvider;
@@ -19,6 +24,18 @@ public class EmbabelResource {
 
     @Inject
     ModelProvider modelProvider;
+
+    @Inject
+    AgentPlatform agentPlatform;
+
+    @Inject
+    ToolLoopConfiguration toolLoopConfig;
+
+    @Inject
+    ConfigurableModelProviderProperties modelProviderProps;
+
+    @ConfigProperty(name = "embabel.agent.platform.name")
+    String platformName;
 
     @GET
     @Produces(MediaType.TEXT_PLAIN)
@@ -39,5 +56,36 @@ public class EmbabelResource {
     public String defaultEmbedding() {
         EmbeddingService embeddingService = modelProvider.getEmbeddingService(DefaultModelSelectionCriteria.INSTANCE);
         return embeddingService.getProvider() + ":" + embeddingService.getName();
+    }
+
+    /**
+     * Returns configuration details to verify that Embabel configurations
+     * are properly bound and injected.
+     */
+    @GET
+    @Path("/config")
+    @Produces(MediaType.APPLICATION_JSON)
+    public ConfigInfo config() {
+        return new ConfigInfo(
+                platformName,
+                agentPlatform.getName(),
+                agentPlatform.getDescription(),
+                toolLoopConfig.getType().name(),
+                toolLoopConfig.getMaxIterations(),
+                modelProviderProps.getDefaultLlm(),
+                modelProviderProps.getDefaultEmbeddingModel());
+    }
+
+    /**
+     * Configuration information DTO for testing config binding.
+     */
+    public record ConfigInfo(
+            String platformNameFromConfig,
+            String platformNameFromBean,
+            String platformDescription,
+            String toolLoopType,
+            int toolLoopMaxIterations,
+            String defaultLlm,
+            String defaultEmbeddingModel) {
     }
 }

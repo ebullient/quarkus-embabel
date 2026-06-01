@@ -1,10 +1,18 @@
 package io.quarkiverse.embabel.it.agent;
 
 import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.notNullValue;
 
+import jakarta.inject.Inject;
+
 import org.junit.jupiter.api.Test;
+
+import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
+import com.embabel.agent.spi.loop.EmptyResponsePolicy;
+import com.embabel.agent.spi.loop.ToolLoopFactory;
+import com.embabel.agent.spi.loop.ToolNotFoundPolicy;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
@@ -33,6 +41,48 @@ import io.restassured.http.ContentType;
  */
 @QuarkusTest
 class CalculatorAgentIntegrationTest {
+
+    @Inject
+    ToolLoopConfiguration toolLoopConfig;
+
+    @Inject
+    ToolNotFoundPolicy toolNotFoundPolicy;
+
+    @Inject
+    EmptyResponsePolicy emptyResponsePolicy;
+
+    @Inject
+    ToolLoopFactory toolLoopFactory;
+
+    /**
+     * Verifies that the ToolLoopConfiguration flows through Embabel's
+     * ToolLoopFactoryConfiguration to produce configured beans.
+     * <p>
+     * This tests the integration chain:
+     * <ol>
+     * <li>EmbabelConfigProducer creates ToolLoopConfiguration from properties</li>
+     * <li>Spring @Configuration class ToolLoopFactoryConfiguration injects it</li>
+     * <li>ToolLoopFactoryConfiguration produces ToolNotFoundPolicy, EmptyResponsePolicy, and ToolLoopFactory</li>
+     * </ol>
+     */
+    @Test
+    void toolLoopConfigurationShouldFlowThroughToFactoryBeans() {
+        // Verify our CDI-produced config bean exists
+        assertThat(toolLoopConfig).isNotNull();
+
+        // Verify the Spring @Configuration class produced these beans using our config
+        assertThat(toolNotFoundPolicy)
+                .as("ToolNotFoundPolicy should be produced by ToolLoopFactoryConfiguration")
+                .isNotNull();
+
+        assertThat(emptyResponsePolicy)
+                .as("EmptyResponsePolicy should be produced by ToolLoopFactoryConfiguration")
+                .isNotNull();
+
+        assertThat(toolLoopFactory)
+                .as("ToolLoopFactory should be produced by ToolLoopFactoryConfiguration")
+                .isNotNull();
+    }
 
     @Test
     void shouldSolveMathProblemUsingTools() {

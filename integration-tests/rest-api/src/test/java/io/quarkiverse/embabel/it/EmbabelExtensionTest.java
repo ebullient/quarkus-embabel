@@ -2,6 +2,7 @@ package io.quarkiverse.embabel.it;
 
 import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 
 import org.junit.jupiter.api.Test;
@@ -51,5 +52,36 @@ public class EmbabelExtensionTest {
         assertThat(embeddingInfo)
                 .as("Default embedding service should be resolved from the model provider")
                 .isEqualTo("openai:text-embedding-ada-002");
+    }
+
+    /**
+     * Tests that Embabel configuration properties are properly bound and injected
+     * through to runtime beans (AgentPlatform, ToolLoopConfiguration, etc.).
+     * <p>
+     * This verifies the full configuration flow:
+     * <ol>
+     * <li>Properties from application.properties (test resources)</li>
+     * <li>Bound to Embabel config classes via quarkus-spring-boot-properties</li>
+     * <li>Injected into CDI producers</li>
+     * <li>Available in runtime beans</li>
+     * </ol>
+     * <p>
+     * Configuration values are defined in {@code src/test/resources/application.properties}.
+     */
+    @Test
+    public void testConfigurationBindingAndInjection() {
+        given()
+                .when().get("/embabel/config")
+                .then()
+                .statusCode(200)
+                .body("platformNameFromConfig", equalTo("test-platform"))
+                .body("platformNameFromBean", equalTo("test-platform"))
+                .body("platformDescription", equalTo("Integration Test Platform"))
+                .body("toolLoopType", equalTo("PARALLEL"))
+                .body("toolLoopMaxIterations", equalTo(3))
+                .body("defaultLlm", equalTo("gpt-4o-mini"))
+                .body("defaultEmbeddingModel", equalTo("text-embedding-ada-002"));
+
+        System.out.println("✓ Configuration successfully flows: properties → config classes → runtime beans");
     }
 }
