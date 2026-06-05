@@ -222,12 +222,22 @@ public class EmbabelConfigProducer {
                 .orElse(3);
         consumedProps.add(TOOLLOOP_PREFIX + "tool-not-found.max-retries");
 
-        int minFuzzyLength = config
+        Integer minFuzzyLength = config
                 .getOptionalValue(TOOLLOOP_PREFIX + "tool-not-found.min-fuzzy-length", Integer.class)
-                .orElse(3);
+                .orElse(null);
         consumedProps.add(TOOLLOOP_PREFIX + "tool-not-found.min-fuzzy-length");
 
-        return new ToolLoopConfiguration.ToolNotFoundProperties(maxRetries, minFuzzyLength);
+        Integer minTokenLength = config
+                .getOptionalValue(TOOLLOOP_PREFIX + "tool-not-found.min-token-length", Integer.class)
+                .orElse(null);
+        consumedProps.add(TOOLLOOP_PREFIX + "tool-not-found.min-token-length");
+
+        double minTokenSimilarity = config
+                .getOptionalValue(TOOLLOOP_PREFIX + "tool-not-found.min-token-similarity", Double.class)
+                .orElse(0.25);
+        consumedProps.add(TOOLLOOP_PREFIX + "tool-not-found.min-token-similarity");
+
+        return new ToolLoopConfiguration.ToolNotFoundProperties(maxRetries, minFuzzyLength, minTokenLength, minTokenSimilarity);
     }
 
     private ToolLoopConfiguration.EmptyResponseProperties buildEmptyResponseProperties(SmallRyeConfig config,

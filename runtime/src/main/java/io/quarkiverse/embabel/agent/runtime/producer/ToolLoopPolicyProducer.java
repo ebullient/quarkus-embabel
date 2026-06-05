@@ -3,9 +3,8 @@ package io.quarkiverse.embabel.agent.runtime.producer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 
-import org.slf4j.LoggerFactory;
-
 import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
+import com.embabel.agent.api.tool.config.ToolLoopConfiguration.ToolNotFoundProperties;
 import com.embabel.agent.spi.loop.AutoCorrectionPolicy;
 import com.embabel.agent.spi.loop.EmptyResponsePolicy;
 import com.embabel.agent.spi.loop.ExitOnEmptyPolicy;
@@ -36,9 +35,6 @@ import io.quarkus.arc.DefaultBean;
  */
 @ApplicationScoped
 public class ToolLoopPolicyProducer {
-
-    private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ToolLoopPolicyProducer.class);
-
     /**
      * Produces {@link ToolNotFoundPolicy} configured from {@link ToolLoopConfiguration}.
      * <p>
@@ -57,9 +53,11 @@ public class ToolLoopPolicyProducer {
     @ApplicationScoped
     @DefaultBean
     public ToolNotFoundPolicy toolNotFoundPolicy(ToolLoopConfiguration config) {
+        ToolNotFoundProperties props = config.getToolNotFound();
         return new AutoCorrectionPolicy(
-                config.getToolNotFound().getMaxRetries(),
-                config.getToolNotFound().getMinFuzzyLength());
+                props.getMaxRetries(),
+                props.getMinFuzzyLength(),
+                props.getMinTokenSimilarity());
     }
 
     /**
