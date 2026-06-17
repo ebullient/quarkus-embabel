@@ -4,14 +4,12 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 
 import org.eclipse.microprofile.config.ConfigProvider;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
@@ -43,6 +41,7 @@ public class EmbabelConfigProducer {
 
     private static final Logger log = Logger.getLogger(EmbabelConfigProducer.class);
 
+    private static final String RANKING_PREFIX = "embabel.agent.platform.ranking.";
     private static final String TOOLLOOP_PREFIX = "embabel.agent.platform.toolloop.";
     private static final String MODELS_PREFIX = "embabel.models.";
 
@@ -63,18 +62,40 @@ public class EmbabelConfigProducer {
      */
     @Produces
     @ApplicationScoped
-    public RankingProperties rankingProperties(
-            @ConfigProperty(name = "embabel.agent.platform.ranking.llm") Optional<String> llm,
-            @ConfigProperty(name = "embabel.agent.platform.ranking.max-attempts", defaultValue = "5") int maxAttempts,
-            @ConfigProperty(name = "embabel.agent.platform.ranking.backoff-millis", defaultValue = "100") long backoffMillis,
-            @ConfigProperty(name = "embabel.agent.platform.ranking.backoff-multiplier", defaultValue = "5.0") double backoffMultiplier,
-            @ConfigProperty(name = "embabel.agent.platform.ranking.backoff-max-interval", defaultValue = "180000") long backoffMaxInterval) {
+    public RankingProperties rankingProperties() {
+        SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+
+        String llm = config
+                .getOptionalValue(RANKING_PREFIX + "llm", String.class)
+                .orElse(null);
+
+        int maxAttempts = config
+                .getOptionalValue(RANKING_PREFIX + "max-attempts", Integer.class)
+                .orElse(5);
+
+        long backoffMillis = config
+                .getOptionalValue(RANKING_PREFIX + "backoff-millis", Long.class)
+                .orElse(100L);
+
+        double backoffMultiplier = config
+                .getOptionalValue(RANKING_PREFIX + "backoff-multiplier", Double.class)
+                .orElse(5.0);
+
+        long backoffMaxInterval = config
+                .getOptionalValue(RANKING_PREFIX + "backoff-max-interval", Long.class)
+                .orElse(180000L);
+
+        String propertyPrefix = config
+                .getOptionalValue(RANKING_PREFIX + "property-prefix", String.class)
+                .orElse(null);
+
         return new RankingProperties(
-                llm.orElse(null),
+                llm,
                 maxAttempts,
                 backoffMillis,
                 backoffMultiplier,
-                backoffMaxInterval);
+                backoffMaxInterval,
+                propertyPrefix);
     }
 
     /**

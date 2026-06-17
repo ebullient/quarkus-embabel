@@ -53,9 +53,6 @@ public class EmbabelProcessor {
     private static final DotName AGENT_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Agent");
     private static final DotName EMBABEL_COMPONENT_ANNOTATION = DotName
             .createSimple("com.embabel.agent.api.annotation.EmbabelComponent");
-    private static final DotName ACTION_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.Action");
-    private static final DotName ACHIEVES_GOAL_ANNOTATION = DotName
-            .createSimple("com.embabel.agent.api.annotation.AchievesGoal");
     private static final DotName TOOL_GROUP_ANNOTATION = DotName.createSimple("com.embabel.agent.api.annotation.ToolGroup");
 
     /**
