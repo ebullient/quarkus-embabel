@@ -3,6 +3,7 @@ package io.quarkiverse.embabel.agent.runtime.llm;
 import jakarta.validation.Validator;
 
 import com.embabel.agent.api.common.Asyncer;
+import com.embabel.agent.api.event.observation.AgentInstrumentation;
 import com.embabel.agent.core.support.LlmInteraction;
 import com.embabel.agent.spi.AutoLlmSelectionCriteriaResolver;
 import com.embabel.agent.spi.ToolDecorator;
@@ -15,8 +16,6 @@ import com.embabel.agent.spi.validation.ValidationPromptGenerator;
 import com.embabel.common.ai.model.ModelProvider;
 import com.embabel.common.textio.template.TemplateRenderer;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
-import io.micrometer.observation.ObservationRegistry;
 
 /**
  * Quarkus-specific implementation of {@link ToolLoopLlmOperations}.
@@ -81,7 +80,7 @@ public class QuarkusToolLoopLlmOperations extends ToolLoopLlmOperations {
             AutoLlmSelectionCriteriaResolver autoLlmSelectionCriteriaResolver,
             LlmOperationsPromptsProperties promptsProperties,
             ObjectMapper objectMapper,
-            ObservationRegistry observationRegistry,
+            AgentInstrumentation agentInstrumentation,
             Asyncer asyncer,
             ToolLoopFactory toolLoopFactory,
             TemplateRenderer templateRenderer) {
@@ -94,7 +93,7 @@ public class QuarkusToolLoopLlmOperations extends ToolLoopLlmOperations {
                 autoLlmSelectionCriteriaResolver,
                 promptsProperties,
                 objectMapper,
-                observationRegistry,
+                agentInstrumentation,
                 asyncer,
                 toolLoopFactory,
                 templateRenderer);

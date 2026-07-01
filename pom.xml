@@ -28,11 +28,12 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <quarkus.version>999-SNAPSHOT</quarkus.version>
-        <embabel-agent.version>0.5.0-SNAPSHOT</embabel-agent.version>
+        <quarkus.version>3.37.0</quarkus.version>
+        <embabel-agent.version>0.5.0</embabel-agent.version>
         <quarkus-langchain4j.version>1.10.0.CR1</quarkus-langchain4j.version>
         <assertj.version>3.27.7</assertj.version>
         <kotlin.version>2.3.21</kotlin.version>
+        <context-propagation.version>1.2.1</context-propagation.version>
         <reactor-core.version>3.7.18</reactor-core.version>
         <spring-retry.version>2.0.12</spring-retry.version>
         <spring-ai-retry.version>1.0.0-M6</spring-ai-retry.version>
@@ -109,6 +110,11 @@
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-retry</artifactId>
                 <version>${spring-ai-retry.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>context-propagation</artifactId>
+                <version>${context-propagation.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.quarkus</groupId>

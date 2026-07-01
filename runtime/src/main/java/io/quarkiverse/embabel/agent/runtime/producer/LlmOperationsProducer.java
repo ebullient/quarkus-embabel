@@ -8,6 +8,8 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 
 import com.embabel.agent.api.common.Asyncer;
+import com.embabel.agent.api.event.observation.AgentInstrumentation;
+import com.embabel.agent.api.event.observation.NoOpAgentInstrumentation;
 import com.embabel.agent.core.internal.LlmOperations;
 import com.embabel.agent.spi.AutoLlmSelectionCriteriaResolver;
 import com.embabel.agent.spi.ToolDecorator;
@@ -20,7 +22,6 @@ import com.embabel.common.ai.model.ModelProvider;
 import com.embabel.common.textio.template.TemplateRenderer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.micrometer.observation.ObservationRegistry;
 import io.quarkiverse.embabel.agent.runtime.llm.QuarkusToolLoopLlmOperations;
 import io.quarkus.arc.DefaultBean;
 
@@ -111,7 +112,7 @@ public class LlmOperationsProducer {
      * <li>{@link Validator} - for validating LLM outputs</li>
      * <li>{@link TemplateRenderer} - for rendering prompt templates</li>
      * <li>{@link ObjectMapper} - for JSON serialization</li>
-     * <li>{@link ObservationRegistry} - for observability (optional)</li>
+     * <li>{@link AgentInstrumentation} - for observability (optional)</li>
      * <li>{@link Asyncer} - for async operations</li>
      * <li>{@link com.embabel.agent.spi.loop.ToolLoopFactory} - for tool loop execution (uses QuarkusToolLoopFactory)</li>
      * </ul>
@@ -124,7 +125,7 @@ public class LlmOperationsProducer {
      * @param promptsProperties configures prompt behavior
      * @param templateRenderer renders prompt templates
      * @param objectMapper JSON object mapper
-     * @param observationRegistry optional observability registry
+     * @param agentInstrumentation optional observability registry
      * @param asyncer executes async operations
      * @param toolLoopFactory creates tool loop executors (injected QuarkusToolLoopFactory)
      * @param autoLlmSelectionCriteriaResolver resolves LLM selection criteria
@@ -141,7 +142,7 @@ public class LlmOperationsProducer {
             LlmOperationsPromptsProperties promptsProperties,
             TemplateRenderer templateRenderer,
             @Named("embabelJacksonObjectMapper") ObjectMapper objectMapper,
-            Instance<ObservationRegistry> observationRegistry,
+            Instance<AgentInstrumentation> agentInstrumentation,
             Asyncer asyncer,
             com.embabel.agent.spi.loop.ToolLoopFactory toolLoopFactory,
             AutoLlmSelectionCriteriaResolver autoLlmSelectionCriteriaResolver) {
@@ -155,7 +156,7 @@ public class LlmOperationsProducer {
                 autoLlmSelectionCriteriaResolver,
                 promptsProperties,
                 objectMapper,
-                observationRegistry.isUnsatisfied() ? ObservationRegistry.NOOP : observationRegistry.get(),
+                agentInstrumentation.isUnsatisfied() ? NoOpAgentInstrumentation.INSTANCE : agentInstrumentation.get(),
                 asyncer,
                 toolLoopFactory,
                 templateRenderer);

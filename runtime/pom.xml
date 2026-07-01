@@ -73,6 +73,11 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <!-- micrometer-context-propagation: required by embabel's ExecutorAsyncer at class-load time -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-stdlib</artifactId>
