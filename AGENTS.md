@@ -82,6 +82,14 @@ deployment/ ──(depends on)──> runtime/
   - `LlmServiceRecorder` - LangChain4j integration recorder
   - `ChatBeansProducer` - Chat model bean production
 
+#### Configuration Binding Pattern
+
+Embabel's configuration classes are Kotlin objects with default values, annotated with Spring's `@ConfigurationProperties`. The `quarkus-spring-boot-properties` extension cannot handle these Kotlin objects, so Jandex-based automatic bean discovery does not work for them. Instead, configuration values must be read manually from SmallRye Config and used to construct the upstream Kotlin property objects directly in CDI producer methods.
+
+See `EmbabelConfigProducer.java` for the canonical examples: each producer method calls `ConfigProvider.getConfig().unwrap(SmallRyeConfig.class)`, reads individual properties with `.getOptionalValue(...)` and `.orElse(default)`, then constructs the upstream Kotlin class via its constructor.
+
+Do not introduce `@ConfigMapping` interfaces for Embabel configuration — the entire extension uses manual binding for consistency.
+
 #### Agent Definition Pattern
 ```java
 @Agent(description = "...")
