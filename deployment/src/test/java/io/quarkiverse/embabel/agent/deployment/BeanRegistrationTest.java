@@ -20,6 +20,7 @@ import com.embabel.agent.api.common.AiBuilder;
 import com.embabel.agent.api.common.ExecutingOperationContext;
 import com.embabel.agent.api.common.OperationContext;
 import com.embabel.agent.api.common.PlatformServices;
+import com.embabel.agent.api.common.autonomy.Autonomy;
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.internal.LlmOperations;
 import com.embabel.agent.domain.io.UserInput;
@@ -103,6 +104,9 @@ class BeanRegistrationTest {
 
     @Inject
     AiBuilder aiBuilder;
+
+    @Inject
+    Autonomy autonomy;
 
     /**
      * Test that extension beans registered by the BeanRegistrationProcessor
@@ -212,6 +216,21 @@ class BeanRegistrationTest {
         assertThat(platformServices.getAgentPlatform())
                 .as("PlatformServices.agentPlatform should be a QuarkusAgentPlatform")
                 .isInstanceOf(QuarkusAgentPlatform.class);
+    }
+
+    @Test
+    void testAutonomyBeanIsInjectable() {
+        assertThat(autonomy)
+                .as("Autonomy should be injectable as a CDI bean")
+                .isNotNull();
+    }
+
+    @Test
+    void testPlatformServicesAutonomyResolves() {
+        Autonomy resolved = agentPlatform.getPlatformServices().autonomy();
+        assertThat(resolved)
+                .as("PlatformServices.autonomy() should resolve to the CDI-produced Autonomy bean")
+                .isNotNull();
     }
 
     @Test

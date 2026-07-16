@@ -12,7 +12,12 @@ import jakarta.enterprise.inject.Produces;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
+import com.embabel.agent.api.common.autonomy.Autonomy;
+import com.embabel.agent.api.common.autonomy.AutonomyProperties;
+import com.embabel.agent.api.common.ranking.Ranker;
 import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
+import com.embabel.agent.core.AgentPlatform;
+import com.embabel.agent.spi.config.spring.AgentPlatformProperties;
 import com.embabel.agent.spi.support.RankingProperties;
 import com.embabel.common.ai.model.ConfigurableModelProviderProperties;
 
@@ -44,6 +49,49 @@ public class EmbabelConfigProducer {
     private static final String RANKING_PREFIX = "embabel.agent.platform.ranking.";
     private static final String TOOLLOOP_PREFIX = "embabel.agent.platform.toolloop.";
     private static final String MODELS_PREFIX = "embabel.models.";
+    private static final String AUTONOMY_PREFIX = "embabel.agent.platform.autonomy.";
+
+    /**
+     * Produces {@link AgentPlatformProperties} for autonomy configuration.
+     * Reads configuration from embabel.agent.platform.autonomy.* properties.
+     * Only the autonomy section is populated; other sections use defaults.
+     */
+    @Produces
+    @ApplicationScoped
+    public AgentPlatformProperties agentPlatformProperties() {
+        SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+        AgentPlatformProperties props = new AgentPlatformProperties();
+
+        AgentPlatformProperties.AutonomyConfig autonomy = props.getAutonomy();
+        config.getOptionalValue(AUTONOMY_PREFIX + "agent-confidence-cut-off", Double.class)
+                .ifPresent(autonomy::setAgentConfidenceCutOff);
+        config.getOptionalValue(AUTONOMY_PREFIX + "goal-confidence-cut-off", Double.class)
+                .ifPresent(autonomy::setGoalConfidenceCutOff);
+
+        return props;
+    }
+
+    /**
+     * Produces {@link AutonomyProperties} wrapping the two confidence thresholds.
+     * Defaults to 0.6 for both agent and goal confidence cut-offs.
+     */
+    @Produces
+    @ApplicationScoped
+    public AutonomyProperties autonomyProperties(AgentPlatformProperties platformProperties) {
+        return new AutonomyProperties(platformProperties);
+    }
+
+    /**
+     * Produces {@link Autonomy} — the service for dynamic agent and goal selection.
+     */
+    @Produces
+    @ApplicationScoped
+    public Autonomy autonomy(
+            AgentPlatform agentPlatform,
+            Ranker ranker,
+            AutonomyProperties properties) {
+        return new Autonomy(agentPlatform, ranker, properties);
+    }
 
     /**
      * Produces {@link RankingProperties} for configuring the ranker.
