@@ -10,41 +10,34 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.embabel.agent.api.channel.OutputChannel;
 import com.embabel.agent.api.common.Asyncer;
+import com.embabel.agent.api.common.autonomy.Autonomy;
+import com.embabel.agent.api.event.observation.AgentInstrumentation;
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.AgentProcessRepository;
 import com.embabel.agent.core.expression.LogicalExpressionParser;
 import com.embabel.agent.core.internal.LlmOperations;
-import com.embabel.agent.core.support.DefaultAgentPlatform;
 import com.embabel.agent.spi.AgentProcessIdGenerator;
 import com.embabel.agent.spi.BlackboardProvider;
 import com.embabel.agent.spi.ContextRepository;
 import com.embabel.agent.spi.OperationScheduler;
 import com.embabel.agent.spi.ToolGroupResolver;
 import com.embabel.agent.spi.config.spring.AgentPlatformProperties;
+import com.embabel.chat.ConversationFactoryProvider;
+import com.embabel.common.ai.model.ModelProvider;
 import com.embabel.common.textio.template.TemplateRenderer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.quarkiverse.embabel.agent.runtime.QuarkusAgentPlatform;
+import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
 
 /**
  * CDI producer for the {@link AgentPlatform} bean.
  * <p>
- * This is the final integration point that brings together all the dependencies required by
- * {@link DefaultAgentPlatform}. It follows the pattern established by
- * {@link io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider} of using CDI
- * to gather dependencies and then delegating to Embabel's implementation.
- * <p>
- * <b>Architecture</b>:
- *
- * <pre>
- * CDI Producers → Dependencies → DefaultAgentPlatform
- *      ↓              ↓                    ↓
- *   Gather      Instantiate           Delegate
- *   Beans       Platform              All Logic
- * </pre>
- * <p>
- * <b>Key Decision</b>: We do NOT replace {@link DefaultAgentPlatform}. It's already
- * framework-agnostic except for the {@code @Service} annotation. Replacing it would require
- * reimplementing 200+ lines of critical logic including agent deployment, process lifecycle,
- * event broadcasting, blackboard management, and tool aggregation.
+ * Produces a {@link QuarkusAgentPlatform} which extends {@link com.embabel.agent.core.support.DefaultAgentPlatform}
+ * and also implements {@link com.embabel.agent.api.common.PlatformServices}, so the platform
+ * is its own platform-services object. CDI {@link Instance} fields for
+ * {@link Autonomy}, {@link ModelProvider}, and {@link ConversationFactoryProvider} are
+ * injected and passed to the platform, which resolves them lazily on demand.
  * <p>
  * <b>Configuration</b>:
  * The platform can be configured via application.properties:
@@ -54,7 +47,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * <li>{@code embabel.agent.platform.process-type} - Process type: SIMPLE or CONCURRENT</li>
  * </ul>
  *
- * @see DefaultAgentPlatform
+ * @see QuarkusAgentPlatform
  * @see com.embabel.agent.spi.config.spring.AgentPlatformConfiguration
  */
 @ApplicationScoped
@@ -107,26 +100,38 @@ public class AgentPlatformProducer {
     TemplateRenderer templateRenderer;
 
     @Inject
-    Instance<LogicalExpressionParser> customLogicalExpressionParser;
+    Instance<LogicalExpressionParser> lexpInstance;
+
+    @Inject
+    Instance<Autonomy> autonomyInstance;
+
+    @Inject
+    Instance<ModelProvider> modelProviderInstance;
+
+    @Inject
+    Instance<ConversationFactoryProvider> cfpInstance;
+
+    @Inject
+    Instance<ActionQosConfig> defaultActionQosCfgInstance;
+
+    @Inject
+    Instance<AgentInstrumentation> agentInstrumentation;
 
     /**
-     * Produces the {@link AgentPlatform} bean by instantiating {@link DefaultAgentPlatform}
-     * with all required dependencies.
+     * Produces the {@link AgentPlatform} bean as a {@link QuarkusAgentPlatform}.
      * <p>
-     * This method gathers all the dependencies that have been produced by other producer classes
-     * ({@link CoreBeansProducer}, {@link EventListenerProducer}, {@link ToolProducer}) and
-     * passes them to {@link DefaultAgentPlatform}'s constructor.
-     * <p>
-     * <b>Note on ApplicationContext</b>: The last parameter is {@code null} because Quarkus
-     * doesn't use Spring's ApplicationContext. This is acceptable because DefaultAgentPlatform
-     * makes ApplicationContext optional (nullable parameter).
+     * {@link QuarkusAgentPlatform} extends {@link com.embabel.agent.core.support.DefaultAgentPlatform}
+     * and implements {@link com.embabel.agent.api.common.PlatformServices}, so
+     * {@code agentPlatform.getPlatformServices()} returns {@code this}.
+     * CDI {@link Instance} fields for {@link Autonomy}, {@link ModelProvider}, and
+     * {@link ConversationFactoryProvider} are resolved lazily on demand.
      *
-     * @return the configured agent platform instance
+     * @return the configured Quarkus agent platform instance
      */
     @Produces
     @ApplicationScoped
     public AgentPlatform agentPlatform() {
-        return new DefaultAgentPlatform(
+        return new QuarkusAgentPlatform(
                 platformName,
                 platformDescription,
                 processType,
@@ -142,10 +147,11 @@ public class AgentPlatformProducer {
                 objectMapper,
                 outputChannel,
                 templateRenderer,
-                customLogicalExpressionParser.isUnsatisfied()
-                        ? null
-                        : customLogicalExpressionParser.get(),
-                null // ApplicationContext - not needed in Quarkus
-        );
+                lexpInstance,
+                autonomyInstance,
+                modelProviderInstance,
+                cfpInstance,
+                defaultActionQosCfgInstance,
+                agentInstrumentation);
     }
 }

@@ -19,11 +19,13 @@ import com.embabel.agent.api.common.Ai;
 import com.embabel.agent.api.common.AiBuilder;
 import com.embabel.agent.api.common.ExecutingOperationContext;
 import com.embabel.agent.api.common.OperationContext;
+import com.embabel.agent.api.common.PlatformServices;
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.internal.LlmOperations;
 import com.embabel.agent.domain.io.UserInput;
 import com.embabel.agent.spi.ToolGroupResolver;
 
+import io.quarkiverse.embabel.agent.runtime.QuarkusAgentPlatform;
 import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
 import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
 import io.quarkus.arc.Arc;
@@ -192,6 +194,24 @@ class BeanRegistrationTest {
         assertThat(agentPlatform.getName())
                 .as("AgentPlatform should have configured name")
                 .isEqualTo("quarkus-agent-platform");
+    }
+
+    /**
+     * Test that the platform's PlatformServices is a QuarkusAgentPlatform (self-reference).
+     * This verifies that QuarkusAgentPlatform implements PlatformServices and returns
+     * itself from getPlatformServices(), replacing SpringContextPlatformServices.
+     */
+    @Test
+    void testPlatformServicesIsQuarkusAgentPlatform() {
+        PlatformServices platformServices = agentPlatform.getPlatformServices();
+
+        assertThat(platformServices)
+                .as("PlatformServices should be a QuarkusAgentPlatform instance")
+                .isInstanceOf(QuarkusAgentPlatform.class);
+
+        assertThat(platformServices.getAgentPlatform())
+                .as("PlatformServices.agentPlatform should be a QuarkusAgentPlatform")
+                .isInstanceOf(QuarkusAgentPlatform.class);
     }
 
     @Test
