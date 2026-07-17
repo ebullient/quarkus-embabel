@@ -3,12 +3,14 @@ package io.quarkiverse.embabel.agent.runtime.producer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 
+import com.embabel.agent.api.common.Asyncer;
 import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
 import com.embabel.agent.api.tool.config.ToolLoopConfiguration.ToolNotFoundProperties;
 import com.embabel.agent.spi.loop.AutoCorrectionPolicy;
 import com.embabel.agent.spi.loop.EmptyResponsePolicy;
 import com.embabel.agent.spi.loop.ExitOnEmptyPolicy;
 import com.embabel.agent.spi.loop.RetryWithFeedbackPolicy;
+import com.embabel.agent.spi.loop.ToolLoopFactory;
 import com.embabel.agent.spi.loop.ToolNotFoundPolicy;
 
 import io.quarkus.arc.DefaultBean;
@@ -54,9 +56,16 @@ public class ToolLoopPolicyProducer {
     @DefaultBean
     public ToolNotFoundPolicy toolNotFoundPolicy(ToolLoopConfiguration config) {
         ToolNotFoundProperties props = config.getToolNotFound();
+        Integer minTokenLength = props.getMinTokenLength();
+        if (minTokenLength == null) {
+            minTokenLength = props.getMinFuzzyLength();
+        }
+        if (minTokenLength == null) {
+            minTokenLength = AutoCorrectionPolicy.DEFAULT_MIN_TOKEN_LENGTH;
+        }
         return new AutoCorrectionPolicy(
                 props.getMaxRetries(),
-                props.getMinFuzzyLength(),
+                minTokenLength,
                 props.getMinTokenSimilarity());
     }
 
@@ -91,5 +100,16 @@ public class ToolLoopPolicyProducer {
         } else {
             return ExitOnEmptyPolicy.INSTANCE;
         }
+    }
+
+    @Produces
+    @ApplicationScoped
+    @DefaultBean
+    public ToolLoopFactory toolLoopFactory(
+            ToolLoopConfiguration config,
+            Asyncer asyncer,
+            ToolNotFoundPolicy toolNotFoundPolicy,
+            EmptyResponsePolicy emptyResponsePolicy) {
+        return ToolLoopFactory.Companion.create(config, asyncer, toolNotFoundPolicy, emptyResponsePolicy);
     }
 }

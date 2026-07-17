@@ -25,9 +25,9 @@ import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.core.internal.LlmOperations;
 import com.embabel.agent.domain.io.UserInput;
 import com.embabel.agent.spi.ToolGroupResolver;
+import com.embabel.agent.spi.loop.ToolLoopFactory;
 
 import io.quarkiverse.embabel.agent.runtime.QuarkusAgentPlatform;
-import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
 import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
 import io.quarkus.arc.Arc;
 import io.quarkus.test.QuarkusExtensionTest;
@@ -76,7 +76,7 @@ class BeanRegistrationTest {
     QuarkusModelProvider modelProvider;
 
     @Inject
-    QuarkusToolLoopFactory toolLoopFactory;
+    ToolLoopFactory toolLoopFactory;
 
     @Inject
     LlmOperations llmOperations;
@@ -119,7 +119,7 @@ class BeanRegistrationTest {
                 .isNotNull();
 
         assertThat(toolLoopFactory)
-                .as("QuarkusToolLoopFactory should be injectable")
+                .as("ToolLoopFactory should be injectable")
                 .isNotNull();
 
         // Verify LlmService beans are resolvable

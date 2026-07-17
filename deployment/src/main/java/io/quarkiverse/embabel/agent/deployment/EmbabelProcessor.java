@@ -24,7 +24,6 @@ import io.quarkiverse.embabel.agent.runtime.ConditionMethodBuildInfo;
 import io.quarkiverse.embabel.agent.runtime.CostMethodBuildInfo;
 import io.quarkiverse.embabel.agent.runtime.LlmServiceRecorder;
 import io.quarkiverse.embabel.agent.runtime.embedding.QuarkusEmbeddingService;
-import io.quarkiverse.embabel.agent.runtime.loop.QuarkusToolLoopFactory;
 import io.quarkiverse.embabel.agent.runtime.provider.QuarkusModelProvider;
 import io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService;
 import io.quarkiverse.langchain4j.ModelName;
@@ -455,40 +454,16 @@ public class EmbabelProcessor {
 
     /**
      * Registers extension beans for CDI discovery.
+     * All beans are marked unremovable to survive build-time pruning.
      * <p>
-     * This build step registers the core extension beans and their producers:
-     * <ul>
-     * <li>{@link QuarkusToolLoopFactory} - Creates tool execution loop instances</li>
-     * <li>{@link QuarkusModelProvider} - Discovers LlmService and EmbeddingService beans via CDI</li>
-     * <li>CoreBeansProducer - Produces core Embabel beans</li>
-     * <li>EventListenerProducer - Produces event listeners for agent lifecycle</li>
-     * <li>ToolProducer - Produces tool-related beans including ToolGroupResolver</li>
-     * <li>LlmOperationsProducer - Produces LlmOperations for agent execution</li>
-     * <li>AgentPlatformProducer - Produces the AgentPlatform bean</li>
-     * </ul>
-     * <p>
-     * All beans are marked as unremovable to ensure they are available at runtime,
-     * even if not directly injected (they may be discovered via CDI Instance).
-     * <p>
-     * Note: LlmService beans are registered separately in {@link #registerLlmServiceBeans}
-     * as synthetic beans, created dynamically for each ChatModel configured via quarkus-langchain4j.
-     *
-     * @param additionalBeans producer for additional bean build items
+     * LlmService and EmbeddingService beans are registered separately in
+     * {@link #registerLlmServiceBeans} / {@link #registerEmbeddingServiceBeans}
+     * as synthetic beans created per configured model.
      */
     @BuildStep
     void registerExtensionBeans(BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
-        // Register tool loop factory
-        // QuarkusToolLoopFactory creates QuarkusToolLoop instances per-request
-        // Already has @ApplicationScoped but marked unremovable to prevent build-time removal
-        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(QuarkusToolLoopFactory.class));
-
-        // Register model provider
-        // QuarkusModelProvider discovers LlmService and EmbeddingService beans via CDI
-        // Already has @ApplicationScoped but marked unremovable to prevent build-time removal
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(QuarkusModelProvider.class));
 
-        // Register CDI producer classes for AgentPlatform dependencies
-        // These producers create all the beans needed by DefaultAgentPlatform
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.CoreBeansProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
@@ -505,10 +480,9 @@ public class EmbabelProcessor {
                 io.quarkiverse.embabel.agent.runtime.producer.AgentPlatformProducer.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 io.quarkiverse.embabel.agent.runtime.producer.ActionQosProducer.class));
-        // String reference avoids compile-time dependency on Kotlin stdlib in deployment module
+
+        // String reference: Kotlin class, no direct import in Java deployment module
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
                 "io.quarkiverse.embabel.agent.runtime.producer.AiBeansProducer"));
-        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(
-                io.quarkiverse.embabel.agent.runtime.producer.LlmOperationsProducer.class));
     }
 }

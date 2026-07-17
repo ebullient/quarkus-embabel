@@ -114,7 +114,7 @@ public class LlmOperationsProducer {
      * <li>{@link ObjectMapper} - for JSON serialization</li>
      * <li>{@link AgentInstrumentation} - for observability (optional)</li>
      * <li>{@link Asyncer} - for async operations</li>
-     * <li>{@link com.embabel.agent.spi.loop.ToolLoopFactory} - for tool loop execution (uses QuarkusToolLoopFactory)</li>
+     * <li>{@link com.embabel.agent.spi.loop.ToolLoopFactory} - for tool loop execution</li>
      * </ul>
      *
      * @param modelProvider provides access to configured LLM models
@@ -127,7 +127,7 @@ public class LlmOperationsProducer {
      * @param objectMapper JSON object mapper
      * @param agentInstrumentation optional observability registry
      * @param asyncer executes async operations
-     * @param toolLoopFactory creates tool loop executors (injected QuarkusToolLoopFactory)
+     * @param toolLoopFactory creates tool loop executors
      * @param autoLlmSelectionCriteriaResolver resolves LLM selection criteria
      * @return configured LlmOperations instance
      */
