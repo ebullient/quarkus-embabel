@@ -41,6 +41,10 @@ quarkus-embabel/
 
 ## Development
 
+### Commits
+
+Do not add `Co-Authored-By`, `Assisted-By`, or similar AI attribution lines to commit messages. AI assistance is assumed; the specific model used is not relevant.
+
 ### Building
 ```bash
 mvn clean install              # Build all modules
