@@ -6,8 +6,6 @@ import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
 import com.embabel.agent.api.channel.OutputChannel;
 import com.embabel.agent.api.common.Asyncer;
 import com.embabel.agent.api.common.autonomy.Autonomy;
@@ -28,7 +26,6 @@ import com.embabel.common.textio.template.TemplateRenderer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.quarkiverse.embabel.agent.runtime.QuarkusAgentPlatform;
-import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
 
 /**
  * CDI producer for the {@link AgentPlatform} bean.
@@ -53,14 +50,8 @@ import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
 @ApplicationScoped
 public class AgentPlatformProducer {
 
-    @ConfigProperty(name = "embabel.agent.platform.name", defaultValue = "quarkus-agent-platform")
-    String platformName;
-
-    @ConfigProperty(name = "embabel.agent.platform.description", defaultValue = "Quarkus Agent Platform")
-    String platformDescription;
-
-    @ConfigProperty(name = "embabel.agent.platform.process-type", defaultValue = "SIMPLE")
-    AgentPlatformProperties.ProcessType processType;
+    @Inject
+    AgentPlatformProperties platformProperties;
 
     @Inject
     LlmOperations llmOperations;
@@ -112,9 +103,6 @@ public class AgentPlatformProducer {
     Instance<ConversationFactoryProvider> cfpInstance;
 
     @Inject
-    Instance<ActionQosConfig> defaultActionQosCfgInstance;
-
-    @Inject
     Instance<AgentInstrumentation> agentInstrumentation;
 
     /**
@@ -132,9 +120,7 @@ public class AgentPlatformProducer {
     @ApplicationScoped
     public AgentPlatform agentPlatform() {
         return new QuarkusAgentPlatform(
-                platformName,
-                platformDescription,
-                processType,
+                platformProperties,
                 llmOperations,
                 toolGroupResolver,
                 eventListener,
@@ -151,7 +137,6 @@ public class AgentPlatformProducer {
                 autonomyInstance,
                 modelProviderInstance,
                 cfpInstance,
-                defaultActionQosCfgInstance,
                 agentInstrumentation);
     }
 }

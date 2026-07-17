@@ -29,7 +29,6 @@ import com.embabel.common.ai.model.ModelProvider;
 import com.embabel.common.textio.template.TemplateRenderer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
 import io.quarkiverse.embabel.agent.runtime.service.ScopedPlatformServices;
 
 /**
@@ -65,14 +64,12 @@ public class QuarkusAgentPlatform extends DefaultAgentPlatform implements Platfo
     private final Instance<Autonomy> autonomyInstance;
     private final Instance<ModelProvider> modelProviderInstance;
     private final Instance<ConversationFactoryProvider> cfpInstance;
-    private final Instance<ActionQosConfig> defaultActionQosCfgInstance;
+    private final AgentPlatformProperties platformProperties;
     private final Instance<AgentInstrumentation> agentInstrumentation;
 
     @SuppressWarnings("java:S107") // many params required to match DefaultAgentPlatform
     public QuarkusAgentPlatform(
-            String name,
-            String description,
-            AgentPlatformProperties.ProcessType processType,
+            AgentPlatformProperties platformProperties,
             LlmOperations llmOperations,
             ToolGroupResolver toolGroupResolver,
             AgenticEventListener eventListener,
@@ -89,9 +86,8 @@ public class QuarkusAgentPlatform extends DefaultAgentPlatform implements Platfo
             Instance<Autonomy> autonomyInstance,
             Instance<ModelProvider> modelProviderInstance,
             Instance<ConversationFactoryProvider> cfpInstance,
-            Instance<ActionQosConfig> defaultActionQosCfgInstance,
             Instance<AgentInstrumentation> agentInstrumentation) {
-        super(name, description, processType,
+        super(platformProperties.getName(), platformProperties.getDescription(), platformProperties.getProcessType(),
                 llmOperations, toolGroupResolver, eventListener,
                 agentProcessIdGenerator, contextRepository, agentProcessRepository,
                 operationScheduler, blackboardProvider, asyncer,
@@ -111,7 +107,7 @@ public class QuarkusAgentPlatform extends DefaultAgentPlatform implements Platfo
         this.autonomyInstance = autonomyInstance;
         this.modelProviderInstance = modelProviderInstance;
         this.cfpInstance = cfpInstance;
-        this.defaultActionQosCfgInstance = defaultActionQosCfgInstance;
+        this.platformProperties = platformProperties;
         this.agentInstrumentation = agentInstrumentation;
     }
 
@@ -212,18 +208,7 @@ public class QuarkusAgentPlatform extends DefaultAgentPlatform implements Platfo
 
     @Override
     public AgentPlatformProperties.ActionQosProperties actionQosProperties() {
-        if (defaultActionQosCfgInstance.isUnsatisfied()) {
-            return new AgentPlatformProperties.ActionQosProperties();
-        }
-        ActionQosConfig config = defaultActionQosCfgInstance.get();
-        AgentPlatformProperties.ActionQosProperties props = new AgentPlatformProperties.ActionQosProperties();
-        props.setDefault(new AgentPlatformProperties.ActionQosProperties.ActionProperties(
-                config.getMaxAttempts(),
-                config.getBackoffMillis(),
-                config.getBackoffMultiplier(),
-                config.getBackoffMaxInterval(),
-                config.getIdempotent()));
-        return props;
+        return platformProperties.getActionQos();
     }
 
     // ── withEventListener: lightweight scoped wrapper ─────────────────────────

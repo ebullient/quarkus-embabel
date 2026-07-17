@@ -6,7 +6,6 @@ import jakarta.inject.Inject;
 
 import org.junit.jupiter.api.Test;
 
-import io.quarkiverse.embabel.agent.runtime.config.ActionQosConfig;
 import io.quarkiverse.embabel.agent.runtime.config.NamedActionQosConfig;
 import io.quarkiverse.embabel.agent.runtime.qos.QuarkusActionQosPropertyProvider;
 import io.quarkus.test.component.QuarkusComponentTest;
@@ -40,9 +39,6 @@ class ActionQosProducerTest {
     ActionQosProducer actionQosProducer;
 
     @Inject
-    ActionQosConfig defaultActionQosConfig;
-
-    @Inject
     NamedActionQosConfig namedActionQosConfig;
 
     @Inject
@@ -50,8 +46,6 @@ class ActionQosProducerTest {
 
     @Test
     void beansAreProduced() {
-        // Verify all three beans are produced by the CDI producer
-        assertThat(defaultActionQosConfig).isNotNull();
         assertThat(namedActionQosConfig).isNotNull();
         assertThat(actionQosPropertyProvider).isNotNull();
     }

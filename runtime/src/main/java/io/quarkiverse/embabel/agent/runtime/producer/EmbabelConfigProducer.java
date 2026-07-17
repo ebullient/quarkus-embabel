@@ -18,6 +18,7 @@ import com.embabel.agent.api.common.ranking.Ranker;
 import com.embabel.agent.api.tool.config.ToolLoopConfiguration;
 import com.embabel.agent.core.AgentPlatform;
 import com.embabel.agent.spi.config.spring.AgentPlatformProperties;
+import com.embabel.agent.spi.config.spring.AgentPlatformProperties.ActionQosProperties.ActionProperties;
 import com.embabel.agent.spi.support.RankingProperties;
 import com.embabel.common.ai.model.ConfigurableModelProviderProperties;
 
@@ -46,38 +47,154 @@ public class EmbabelConfigProducer {
 
     private static final Logger log = Logger.getLogger(EmbabelConfigProducer.class);
 
-    private static final String RANKING_PREFIX = "embabel.agent.platform.ranking.";
-    private static final String TOOLLOOP_PREFIX = "embabel.agent.platform.toolloop.";
+    private static final String PLATFORM_PREFIX = "embabel.agent.platform.";
+    private static final String RANKING_PREFIX = PLATFORM_PREFIX + "ranking.";
+    private static final String TOOLLOOP_PREFIX = PLATFORM_PREFIX + "toolloop.";
+    private static final String AUTONOMY_PREFIX = PLATFORM_PREFIX + "autonomy.";
     private static final String MODELS_PREFIX = "embabel.models.";
-    private static final String AUTONOMY_PREFIX = "embabel.agent.platform.autonomy.";
 
-    /**
-     * Produces {@link AgentPlatformProperties} for autonomy configuration.
-     * Reads configuration from embabel.agent.platform.autonomy.* properties.
-     * Only the autonomy section is populated; other sections use defaults.
-     */
-    @Produces
-    @ApplicationScoped
-    public AgentPlatformProperties agentPlatformProperties() {
+    private final AgentPlatformProperties platformProperties;
+    private final String rankingPropertyPrefix;
+
+    public EmbabelConfigProducer() {
         SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
         AgentPlatformProperties props = new AgentPlatformProperties();
 
+        // Top-level (Quarkus-specific defaults override upstream "embabel-default")
+        props.setName(config.getOptionalValue(PLATFORM_PREFIX + "name", String.class)
+                .orElse("quarkus-agent-platform"));
+        props.setDescription(config.getOptionalValue(PLATFORM_PREFIX + "description", String.class)
+                .orElse("Quarkus Agent Platform"));
+        config.getOptionalValue(PLATFORM_PREFIX + "process-type", AgentPlatformProperties.ProcessType.class)
+                .ifPresent(props::setProcessType);
+
+        // Scanning
+        AgentPlatformProperties.ScanningConfig scanning = props.getScanning();
+        config.getOptionalValue(PLATFORM_PREFIX + "scanning.annotation", Boolean.class)
+                .ifPresent(scanning::setAnnotation);
+        config.getOptionalValue(PLATFORM_PREFIX + "scanning.bean", Boolean.class)
+                .ifPresent(scanning::setBean);
+
+        // Ranking
+        AgentPlatformProperties.RankingConfig ranking = props.getRanking();
+        config.getOptionalValue(RANKING_PREFIX + "llm", String.class)
+                .ifPresent(ranking::setLlm);
+        config.getOptionalValue(RANKING_PREFIX + "max-attempts", Integer.class)
+                .ifPresent(ranking::setMaxAttempts);
+        config.getOptionalValue(RANKING_PREFIX + "backoff-millis", Long.class)
+                .ifPresent(ranking::setBackoffMillis);
+        config.getOptionalValue(RANKING_PREFIX + "backoff-multiplier", Double.class)
+                .ifPresent(ranking::setBackoffMultiplier);
+        config.getOptionalValue(RANKING_PREFIX + "backoff-max-interval", Long.class)
+                .ifPresent(ranking::setBackoffMaxInterval);
+        this.rankingPropertyPrefix = config
+                .getOptionalValue(RANKING_PREFIX + "property-prefix", String.class)
+                .orElse(RankingProperties.PREFIX);
+
+        // LLM Operations
+        AgentPlatformProperties.LlmOperationsConfig llmOps = props.getLlmOperations();
+        config.getOptionalValue(PLATFORM_PREFIX + "llm-operations.prompts.maybe-prompt-template", String.class)
+                .ifPresent(llmOps.getPrompts()::setMaybePromptTemplate);
+        config.getOptionalValue(PLATFORM_PREFIX + "llm-operations.prompts.generate-examples-by-default", Boolean.class)
+                .ifPresent(llmOps.getPrompts()::setGenerateExamplesByDefault);
+        config.getOptionalValue(PLATFORM_PREFIX + "llm-operations.data-binding.max-attempts", Integer.class)
+                .ifPresent(llmOps.getDataBinding()::setMaxAttempts);
+        config.getOptionalValue(PLATFORM_PREFIX + "llm-operations.data-binding.fixed-backoff-millis", Long.class)
+                .ifPresent(llmOps.getDataBinding()::setFixedBackoffMillis);
+
+        // Process ID Generation
+        AgentPlatformProperties.ProcessIdGenerationConfig pidGen = props.getProcessIdGeneration();
+        config.getOptionalValue(PLATFORM_PREFIX + "process-id-generation.include-version", Boolean.class)
+                .ifPresent(pidGen::setIncludeVersion);
+        config.getOptionalValue(PLATFORM_PREFIX + "process-id-generation.include-agent-name", Boolean.class)
+                .ifPresent(pidGen::setIncludeAgentName);
+
+        // Autonomy
         AgentPlatformProperties.AutonomyConfig autonomy = props.getAutonomy();
         config.getOptionalValue(AUTONOMY_PREFIX + "agent-confidence-cut-off", Double.class)
                 .ifPresent(autonomy::setAgentConfidenceCutOff);
         config.getOptionalValue(AUTONOMY_PREFIX + "goal-confidence-cut-off", Double.class)
                 .ifPresent(autonomy::setGoalConfidenceCutOff);
 
-        return props;
+        // Models (provider retry config)
+        AgentPlatformProperties.ModelsConfig models = props.getModels();
+        config.getOptionalValue(PLATFORM_PREFIX + "models.anthropic.max-attempts", Integer.class)
+                .ifPresent(models.getAnthropic()::setMaxAttempts);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.anthropic.backoff-millis", Long.class)
+                .ifPresent(models.getAnthropic()::setBackoffMillis);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.anthropic.backoff-multiplier", Double.class)
+                .ifPresent(models.getAnthropic()::setBackoffMultiplier);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.anthropic.backoff-max-interval", Long.class)
+                .ifPresent(models.getAnthropic()::setBackoffMaxInterval);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.openai.max-attempts", Integer.class)
+                .ifPresent(models.getOpenai()::setMaxAttempts);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.openai.backoff-millis", Long.class)
+                .ifPresent(models.getOpenai()::setBackoffMillis);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.openai.backoff-multiplier", Double.class)
+                .ifPresent(models.getOpenai()::setBackoffMultiplier);
+        config.getOptionalValue(PLATFORM_PREFIX + "models.openai.backoff-max-interval", Long.class)
+                .ifPresent(models.getOpenai()::setBackoffMaxInterval);
+
+        // SSE
+        AgentPlatformProperties.SseConfig sse = props.getSse();
+        config.getOptionalValue(PLATFORM_PREFIX + "sse.max-buffer-size", Integer.class)
+                .ifPresent(sse::setMaxBufferSize);
+        config.getOptionalValue(PLATFORM_PREFIX + "sse.max-process-buffers", Integer.class)
+                .ifPresent(sse::setMaxProcessBuffers);
+
+        // REST
+        AgentPlatformProperties.RestConfig rest = props.getRest();
+        config.getOptionalValue(PLATFORM_PREFIX + "rest.process-status-enabled", Boolean.class)
+                .ifPresent(rest::setProcessStatusEnabled);
+        config.getOptionalValue(PLATFORM_PREFIX + "rest.process-kill-enabled", Boolean.class)
+                .ifPresent(rest::setProcessKillEnabled);
+        config.getOptionalValue(PLATFORM_PREFIX + "rest.process-events-enabled", Boolean.class)
+                .ifPresent(rest::setProcessEventsEnabled);
+
+        // Test
+        config.getOptionalValue(PLATFORM_PREFIX + "test.mock-mode", Boolean.class)
+                .ifPresent(props.getTest()::setMockMode);
+
+        // Action QoS defaults
+        AgentPlatformProperties.ActionQosProperties actionQos = props.getActionQos();
+        ActionProperties aqDefault = actionQos.getDefault();
+        config.getOptionalValue(PLATFORM_PREFIX + "action-qos.default.max-attempts", Integer.class)
+                .ifPresent(aqDefault::setMaxAttempts);
+        config.getOptionalValue(PLATFORM_PREFIX + "action-qos.default.backoff-millis", Long.class)
+                .ifPresent(aqDefault::setBackoffMillis);
+        config.getOptionalValue(PLATFORM_PREFIX + "action-qos.default.backoff-multiplier", Double.class)
+                .ifPresent(aqDefault::setBackoffMultiplier);
+        config.getOptionalValue(PLATFORM_PREFIX + "action-qos.default.backoff-max-interval", Long.class)
+                .ifPresent(aqDefault::setBackoffMaxInterval);
+        config.getOptionalValue(PLATFORM_PREFIX + "action-qos.default.idempotent", Boolean.class)
+                .ifPresent(aqDefault::setIdempotent);
+
+        // Threading
+        AgentPlatformProperties.ThreadingProperties threading = props.getThreading();
+        config.getOptionalValue(PLATFORM_PREFIX + "threading.override", Boolean.class)
+                .ifPresent(threading::setOverride);
+        config.getOptionalValue(PLATFORM_PREFIX + "threading.shared", Boolean.class)
+                .ifPresent(threading::setShared);
+
+        this.platformProperties = props;
     }
 
     /**
-     * Produces {@link AutonomyProperties} wrapping the two confidence thresholds.
-     * Defaults to 0.6 for both agent and goal confidence cut-offs.
+     * Produces {@link AgentPlatformProperties} fully populated from
+     * {@code embabel.agent.platform.*} properties.
      */
     @Produces
     @ApplicationScoped
-    public AutonomyProperties autonomyProperties(AgentPlatformProperties platformProperties) {
+    public AgentPlatformProperties agentPlatformProperties() {
+        return platformProperties;
+    }
+
+    /**
+     * Produces {@link AutonomyProperties} from the autonomy section of {@link AgentPlatformProperties}.
+     */
+    @Produces
+    @ApplicationScoped
+    public AutonomyProperties autonomyProperties() {
         return new AutonomyProperties(platformProperties);
     }
 
@@ -94,56 +211,19 @@ public class EmbabelConfigProducer {
     }
 
     /**
-     * Produces {@link RankingProperties} for configuring the ranker.
-     * Reads configuration from embabel.agent.platform.ranking.* properties.
-     * <p>
-     * Note: This producer is needed because RankingProperties is a Kotlin data class
-     * with immutable fields, which Spring Boot @ConfigurationProperties cannot bind to.
-     * This producer overrides the Spring Boot properties bean with @Alternative/@Priority.
-     *
-     * @param llm LLM name for ranking, or empty to use auto-selection
-     * @param maxAttempts maximum retry attempts
-     * @param backoffMillis initial backoff time in milliseconds
-     * @param backoffMultiplier backoff multiplier for exponential backoff
-     * @param backoffMaxInterval maximum backoff interval in milliseconds
-     * @return the ranking properties
+     * Produces {@link RankingProperties} from the ranking section of {@link AgentPlatformProperties}.
      */
     @Produces
     @ApplicationScoped
     public RankingProperties rankingProperties() {
-        SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
-
-        String llm = config
-                .getOptionalValue(RANKING_PREFIX + "llm", String.class)
-                .orElse(null);
-
-        int maxAttempts = config
-                .getOptionalValue(RANKING_PREFIX + "max-attempts", Integer.class)
-                .orElse(5);
-
-        long backoffMillis = config
-                .getOptionalValue(RANKING_PREFIX + "backoff-millis", Long.class)
-                .orElse(100L);
-
-        double backoffMultiplier = config
-                .getOptionalValue(RANKING_PREFIX + "backoff-multiplier", Double.class)
-                .orElse(5.0);
-
-        long backoffMaxInterval = config
-                .getOptionalValue(RANKING_PREFIX + "backoff-max-interval", Long.class)
-                .orElse(180000L);
-
-        String propertyPrefix = config
-                .getOptionalValue(RANKING_PREFIX + "property-prefix", String.class)
-                .orElse(null);
-
+        AgentPlatformProperties.RankingConfig ranking = platformProperties.getRanking();
         return new RankingProperties(
-                llm,
-                maxAttempts,
-                backoffMillis,
-                backoffMultiplier,
-                backoffMaxInterval,
-                propertyPrefix);
+                ranking.getLlm(),
+                ranking.getMaxAttempts(),
+                ranking.getBackoffMillis(),
+                ranking.getBackoffMultiplier(),
+                ranking.getBackoffMaxInterval(),
+                rankingPropertyPrefix);
     }
 
     /**
