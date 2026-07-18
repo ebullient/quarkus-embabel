@@ -5,6 +5,7 @@ import java.util.function.Function;
 import org.eclipse.microprofile.config.ConfigProvider;
 
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import io.quarkiverse.embabel.agent.runtime.embedding.QuarkusEmbeddingService;
 import io.quarkiverse.embabel.agent.runtime.service.QuarkusLlmService;
@@ -52,19 +53,18 @@ public class LlmServiceRecorder {
                     .getOptionalValue(modelNameKey, String.class)
                     .orElse(configName); // Fallback to configName if model-name not configured
 
-            // Get ChatModel as a CDI dependency using the creational context
-            // This makes ChatModel a proper dependency of LlmService, so CDI ensures
-            // it's available before creating this bean
             ChatModel chatModel;
+            StreamingChatModel streamingChatModel;
             if (NamedConfigUtil.isDefault(configName)) {
-                // Default model - no qualifier
                 chatModel = context.getInjectedReference(ChatModel.class);
+                streamingChatModel = context.getInjectedReference(StreamingChatModel.class);
             } else {
-                // Named model - use @ModelName qualifier
                 chatModel = context.getInjectedReference(ChatModel.class, ModelName.Literal.of(configName));
+                streamingChatModel = context.getInjectedReference(StreamingChatModel.class,
+                        ModelName.Literal.of(configName));
             }
 
-            return new QuarkusLlmService(modelName, provider, chatModel);
+            return new QuarkusLlmService(modelName, provider, chatModel, streamingChatModel);
         };
     }
 

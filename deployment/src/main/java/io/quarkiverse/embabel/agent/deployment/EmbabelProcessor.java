@@ -353,24 +353,29 @@ public class EmbabelProcessor {
                     .unremovable()
                     .createWith(recorder.createLlmService(configName, provider));
 
-            // Declare ChatModel as an injection point dependency
-            // This tells CDI that LlmService depends on ChatModel and ensures proper initialization order
+            // Declare ChatModel and StreamingChatModel as injection point dependencies
+            // This tells CDI that LlmService depends on these models and ensures proper initialization order
             if (!NamedConfigUtil.isDefault(configName)) {
-                // Named model - inject ChatModel with @ModelName qualifier
+                AnnotationInstance modelNameQualifier = AnnotationInstance.builder(ModelName.class)
+                        .add("value", configName)
+                        .build();
+                // Named model - inject ChatModel and StreamingChatModel with @ModelName qualifier
                 configurator.addInjectionPoint(
                         ClassType.create(DotName.createSimple("dev.langchain4j.model.chat.ChatModel")),
-                        AnnotationInstance.builder(ModelName.class)
-                                .add("value", configName)
-                                .build());
+                        modelNameQualifier);
+                configurator.addInjectionPoint(
+                        ClassType.create(
+                                DotName.createSimple("dev.langchain4j.model.chat.StreamingChatModel")),
+                        modelNameQualifier);
                 // Add @ModelName qualifier to the LlmService bean itself
-                configurator.addQualifier(
-                        AnnotationInstance.builder(ModelName.class)
-                                .add("value", configName)
-                                .build());
+                configurator.addQualifier(modelNameQualifier);
             } else {
-                // Default model - inject ChatModel without qualifier
+                // Default model - inject ChatModel and StreamingChatModel without qualifier
                 configurator.addInjectionPoint(
                         ClassType.create(DotName.createSimple("dev.langchain4j.model.chat.ChatModel")));
+                configurator.addInjectionPoint(
+                        ClassType.create(
+                                DotName.createSimple("dev.langchain4j.model.chat.StreamingChatModel")));
                 configurator.defaultBean();
             }
 
